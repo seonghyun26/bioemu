@@ -132,3 +132,8 @@ cython_debug/
 *.pth
 *.pt
 
+*.npz
+*.xtc
+*.ckpt
+*.fasta
+*wandb*

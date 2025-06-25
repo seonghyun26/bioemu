@@ -28,8 +28,20 @@ from .utils import (
     format_npz_samples_filename,
     print_traceback_on_exception,
 )
+# from chemgraph import ChemGraph
+# from convert_chemgraph import save_pdb_and_xtc
+# from get_embeds import get_colabfold_embeds
+# from models import DiGConditionalScoreModel, DiGConditionalScoreModelControl
+# from sde_lib import SDE
+# from seq_io import check_protein_valid, parse_sequence, write_fasta
+# from utils import (
+#     count_samples_in_output_dir,
+#     format_npz_samples_filename,
+#     print_traceback_on_exception,
+# )
 
 logger = logging.getLogger(__name__)
+HYDRA_FULL_ERROR=1
 
 DEFAULT_DENOISER_CONFIG_DIR = Path(__file__).parent / "config/denoiser/"
 SupportedDenoisersLiteral = Literal["dpm", "heun"]
@@ -146,11 +158,16 @@ def main(
         # Save FASTA file in output_dir
         write_fasta([sequence], fasta_path)
 
+    # Load model
     model_state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     score_model: DiGConditionalScoreModel = hydra.utils.instantiate(model_config["score_model"])
+    # score_model: DiGConditionalScoreModelControl = hydra.utils.instantiate(model_config["score_model"])
     score_model.load_state_dict(model_state)
     sdes: dict[str, SDE] = hydra.utils.instantiate(model_config["sdes"])
 
+    # NOTE: Additional training to control the score model
+    
+    
     if denoiser_config_path is None:
         assert (
             denoiser_type in SUPPORTED_DENOISERS

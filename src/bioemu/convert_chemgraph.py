@@ -10,6 +10,9 @@ import torch
 from .openfold.np import residue_constants
 from .openfold.np.protein import Protein, to_pdb
 from .openfold.utils.rigid_utils import Rigid, Rotation
+# from openfold.np import residue_constants
+# from openfold.np.protein import Protein, to_pdb
+# from openfold.utils.rigid_utils import Rigid, Rotation
 
 logger = logging.getLogger(__name__)
 

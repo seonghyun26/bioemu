@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 typer_app = typer.Typer(pretty_exceptions_enable=False)
 
 HPACKER_ENVNAME = os.getenv("HPACKER_ENV_NAME", HPACKER_DEFAULT_ENVNAME)
+# HPACKER_ENVNAME = "bioemu2"
 HPACKER_REPO_DIR = os.getenv("HPACKER_REPO_DIR", HPACKER_DEFAULT_REPO_DIR)
 
 

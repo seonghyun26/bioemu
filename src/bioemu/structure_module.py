@@ -266,6 +266,45 @@ class SAEncoder(nn.Module):
         for module in self.layers:
             x1d = module(x1d, x2d, pose, bias)
         return x1d
+    
+class SAEncoderControl(nn.Module):
+    """Stack of IPA layers interleaved with layernorm and MLPs."""
+
+    def __init__(self, n_layer: int, **kwargs):
+        super().__init__()
+        self.layers = nn.ModuleList([SAEncoderLayer(**kwargs) for _ in range(n_layer)])
+        self.mlcv = None
+        self.mlcv2score = None
+
+    def forward(
+        self,
+        x1d: torch.Tensor,
+        x2d: torch.Tensor,
+        pose: tuple[torch.Tensor, torch.Tensor],
+        bias: torch.Tensor,
+        mlcv: torch.Tensor = None,
+    ) -> torch.Tensor:
+        # x1d: [B, L, C]
+        # B: batch size
+        # L: sequence length
+        # C: channel size
+        # mlcv: [B, mlcv_dim]
+        
+        # if mlcv is not None:
+        #     x1d_cond = x1d + mlcv
+        #     x1d = self.zero_conv(x1d)
+        
+        for i, module in enumerate(self.layers):
+            # NOTE: Original
+            res = module(x1d, x2d, pose, bias)
+            x1d = res
+            
+            # NOTE: Control
+            # res = module(x1d, x2d, pose, bias)
+            # control_x1d = self._modules[f"control_encoder_{i}"](control_x1d, x2d, pose, bias)
+            # control_x1d = self._modules[f"zero_conv_{i}"](control_x1d)
+            # x1d = res + control_x1d
+        return x1d
 
 
 class StructureModule(nn.Module):
@@ -285,3 +324,23 @@ class StructureModule(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         x1d = self.encoder(x1d, x2d, pose, bias)
         return self.diff_head(x1d)
+    
+class StructureModuleControl(nn.Module):
+    """Network that predicts translation and rotation score from input translations and rotations."""
+
+    def __init__(self, d_model: int, **kwargs):
+        super().__init__()
+        self.encoder = SAEncoderControl(d_model=d_model, **kwargs)
+        self.diff_head = DiffHead(ninp=d_model)
+
+    def forward(
+        self,
+        pose: tuple[torch.Tensor, torch.Tensor],
+        x1d: torch.Tensor,
+        x2d: torch.Tensor,
+        bias: torch.Tensor,
+        mlcv: torch.Tensor = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        x1d = self.encoder(x1d, x2d, pose, bias, mlcv)
+        change = self.diff_head(x1d)
+        return change

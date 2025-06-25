@@ -9,7 +9,14 @@ from torch import nn
 from torch_geometric.utils import to_dense_adj, to_dense_batch
 
 from .chemgraph import ChemGraph
-from .structure_module import StructureModule
+from .structure_module import StructureModule, StructureModuleControl
+# from chemgraph import ChemGraph
+# from structure_module import StructureModule
+
+
+from mlcolvar.cvs import DeepLDA, DeepTDA
+from mlcolvar.data import DictDataset, DictModule
+
 
 # Number of dimensions for the nodes and edges of Evoformer embeddings
 EVOFORMER_NODE_DIM: int = 384
@@ -323,6 +330,195 @@ class DistributionalGraphormer(nn.Module):
         return super().__str__() + f"\nTrainable parameters: {params}"
 
 
+class DistributionalGraphormerControl(nn.Module):
+    def __init__(
+        self,
+        dim_model: int = 512,
+        dim_pair: int = 256,
+        num_layers: int = 8,
+        num_heads: int = 32,
+        dim_single_rep: int = 64,
+        dim_hidden: int = 1024,
+        num_buckets: int = 64,
+        max_distance_relative: int = 128,
+        dropout: float = 0.1,
+    ):
+        """
+        Basic distributional graphormer model. For architecture details, please refer to:
+        https://arxiv.org/abs/2306.05445
+
+        Args:
+            dim_model: Number of features used for main model representation.
+            dim_pair: Number of features used for pair representations.
+            num_layers: Number of layers used in the structure model.
+            num_heads: Number of heads used for attention.
+            dim_single_rep: Number of features used for single sequence embeddings.
+            dim_pair_rep: Number of features used for pair embeddings.
+            dim_hidden: Number of nodes used in hidden layers.
+            num_buckets: Number of buckets used in relative positional encoding.
+            max_distance_relative: Maximum distance considered in relative positional encoding.
+            dropout: _description_. Defaults to 0.1.
+
+            Let (T_in, R_in) be the input frames, and let (T, R) be an arbitrary rotation and translation.
+            Let T_out, R_out = model(T_in, R_in). And let T_out_transformed, R_out_transformed = model((T, R) * (T_in, R_in)), where frames are
+            composed according to Section 1.1 of the AF2 Supplementary Material.
+
+            The model has the following equivariance properties:
+                T_out_transformed = R * T_out
+                R_out_transformed = R_out
+            This makes it suitable for regressing the "invariant score", as in the DiG paper.
+        """
+
+        super().__init__()
+
+        self.d_model = dim_model
+
+        # Set the dimensions for EVOFORMER feature embedding
+        dim_single_rep = EVOFORMER_NODE_DIM
+        self.dim_pair_rep = EVOFORMER_EDGE_DIM
+
+        self.step_emb = SinusoidalPositionEmbedder(dim=self.d_model)
+        self.x1d_proj = nn.Sequential(
+            nn.LayerNorm(dim_single_rep),
+            nn.Linear(dim_single_rep, self.d_model, bias=False),
+        )
+        self.x2d_proj = nn.Sequential(
+            nn.LayerNorm(self.dim_pair_rep),
+            nn.Linear(self.dim_pair_rep, dim_pair, bias=False),
+        )
+        self.rp_proj = RelativePositionBias(
+            num_buckets=num_buckets, max_distance=max_distance_relative, out_dim=dim_pair
+        )
+
+        self.st_module = StructureModuleControl(
+            d_pair=dim_pair,
+            n_layer=num_layers,
+            d_model=self.d_model,
+            n_head=num_heads,
+            dim_feedforward=dim_hidden,
+            dropout=dropout,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        node_orientations: torch.Tensor,
+        batch_index: torch.Tensor,
+        t: torch.Tensor,
+        context: ChemGraph,
+        mlcv: torch.Tensor = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Predict translation and rotation scores based on noisy positions and node orientations.
+        This function takes and returns quantities in sparse batch format.
+
+        Args:
+            x: [N, 3] node positions.
+            node_orientations: Rotation matrices encoding orientations [N, 3, 3].
+            batch_index: Sparse batch indices.
+            t: Current diffusion time steps.
+            context: Current batch in ChemGraph format. Used for embeddings, labels and masking.
+
+        Returns:
+            Predicted translation and rotation scores, both in vector representation. The
+            translation score will be equivariant and the rotation score invariant to global pose
+            rotations.
+        """
+        batch_index = context.batch
+        # Convert from sparse graph representation to dense representation used by DiG.
+        T_perturbed, mask = to_dense_batch(
+            x, batch_index
+        )  # [B, L, 3], [B, L], L is maximum number of residues in a batch
+        IR_perturbed, _ = to_dense_batch(node_orientations, batch_index)  # [B, L, 3, 3]
+
+        # Transform node and edge embeddings from sparse to dense.
+        single_repr, _ = to_dense_batch(context.single_embeds, batch_index)
+        single_repr = single_repr.to(torch.float32)  # [B, L, 384]
+        pair_repr = to_dense_adj(  # [B, L, L, 128]
+            context.edge_index, batch_index, edge_attr=context.pair_embeds
+        ).to(torch.float32)
+
+        # Deal with masking that comes from the data itself, not just the dense batch representation.
+        # There are two sources of masking - the first is the mask that comes from the data itself,
+        # which represents residues where the position/orientation are unknown. This is captured in
+        # `pos_is_known`. The second is masking due to uneven length proteins in the dense batch
+        # representation. This is captured in `mask``.
+        # attn_mask is True if the element should be masked out in attention, following DiG conventions.
+        if "pos_is_known" in context:
+            pos_is_known = context.pos_is_known
+            pos_is_known_dense = to_dense_batch(pos_is_known, batch_index)[0].bool()  # [B, L]
+            attn_mask = ~(mask & pos_is_known_dense)  # [B, L]
+        else:
+            attn_mask = ~mask  # [B, L]
+
+        t, _ = to_dense_batch(t, batch_index)  # [B, L]
+        t = t[:, 0]  # [B], each residue experiences the same timestep.
+
+        # Embed single_repr, noise level "t" and the conditionings from context into x1d.
+        x1d = self.x1d_proj(single_repr) + self.step_emb(t)[:, None]  # [B, L, C]
+
+        # NOTE: Embed mlcv into x1d
+        # Embed mlcv into x1d : [B, 1, 1] -> [B, L, C]
+        if mlcv is not None:
+            mlcv_expanded = mlcv.view(x1d.shape[0], 1, 1).expand(-1, x1d.shape[1], x1d.shape[2])
+            x1d = x1d + mlcv_expanded
+
+        x2d = self.x2d_proj(pair_repr)  # [B, L, L, C]
+
+        pos_sequence = torch.arange(
+            T_perturbed.shape[1], device=x1d.device
+        )  # [L], integer sequence index
+
+        pos_sequence = pos_sequence.unsqueeze(1) - pos_sequence.unsqueeze(
+            0
+        )  # [L, L], integer relative sequence positions.
+        x2d = x2d + self.rp_proj(pos_sequence)[None]
+
+        z = (~attn_mask).long().sum(-1, keepdims=True)  # [B, 1], number of unmasked elements.
+        filled_mask = attn_mask.masked_fill(
+            z == 0, False  # z == 0 means no unmasked elements, i.e., all elements are masked.
+        )  # [B, L], fill in False if all elements are masked. This is to avoid the case where all elements are masked, which would cause an error in the softmax I think.
+
+        bias = filled_mask.float().masked_fill(filled_mask, float("-inf"))[:, None, :, None]
+        bias = bias.permute(
+            0, 3, 1, 2
+        )  # [B, 1, 1, L], this has the value -inf for elements that are masked.
+
+        # Change in translation and rotation. At this point, both quantities are invariant to global
+        # SE(3) transformations.
+        (
+            T_eps,
+            IR_eps,
+        ) = self.st_module(  # st_module plays an equivalent role to BackboneUpdate in the Algorithm 20 of AF2 supplement.
+            (T_perturbed, IR_perturbed), x1d, x2d, bias
+        )
+
+        # Introduce orientation dependence of the translation score.
+        T_eps = torch.matmul(IR_perturbed.transpose(-1, -2), T_eps.unsqueeze(-1)).squeeze(-1)
+        T_out, R_out = T_eps, IR_eps
+
+        # Return back to sparse graph representation
+        T_out = T_out[mask]  # [N, 3]
+        R_out = R_out[mask]  # [N, 3], in axis angle representation.
+
+        return (
+            T_out,
+            R_out,
+        )
+
+    def __str__(self) -> str:
+        """
+        Model prints with number of trainable parameters.
+        """
+        model_parameters = filter(lambda p: p.requires_grad, self.parameters())
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        return super().__str__() + f"\nTrainable parameters: {params}"
+
+    def load_pretrained(self, pretrained_weights):
+        print(f"Loading pretrained model from {pretrained_weights}")
+        self.load_state_dict(pretrained_weights)
+        
+
 class DiGConditionalScoreModel(torch.nn.Module):
     """Wrapper to convert the DiG nn.Module neural network that operates directly on position
     and rotation tensors into a ScoreModel that operates on ChemGraph objects.
@@ -344,7 +540,18 @@ class DiGConditionalScoreModel(torch.nn.Module):
         Args: all passed through to DistributionalGraphormer
         """
         super().__init__()
-        self.model_nn = DistributionalGraphormer(
+        # self.model_nn = DistributionalGraphormer(
+        #     dim_model=dim_model,
+        #     dim_pair=dim_pair,
+        #     num_layers=num_layers,
+        #     num_heads=num_heads,
+        #     dim_single_rep=dim_single_rep,
+        #     dim_hidden=dim_hidden,
+        #     num_buckets=num_buckets,
+        #     max_distance_relative=max_distance_relative,
+        #     dropout=dropout,
+        # )
+        self.model_nn = DistributionalGraphormerControl(
             dim_model=dim_model,
             dim_pair=dim_pair,
             num_layers=num_layers,
@@ -356,7 +563,7 @@ class DiGConditionalScoreModel(torch.nn.Module):
             dropout=dropout,
         )
 
-    def forward(self, x: ChemGraph, t: torch.Tensor) -> ChemGraph:
+    def forward(self, x: ChemGraph, t: torch.Tensor, mlcv: torch.Tensor = None) -> ChemGraph:
         # NOTE: the DiG structure model uses a time embedding intended for integer time
         # steps between 0 and num_timesteps (1000 by default). The SDE gets times between
         # 0 and 1, where the filter used in the embedding is less expressive. To avoid
@@ -379,6 +586,9 @@ class DiGConditionalScoreModel(torch.nn.Module):
             batch_index=x.batch,
             t=time_effective,
             context=context,
+            mlcv=mlcv,
         )
-
         return x.replace(pos=pos, node_orientations=node_orientations)
+    
+    def load_pretrained(self, pretrained_weights):
+        self.model_nn.load_pretrained(pretrained_weights)

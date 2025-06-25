@@ -9,6 +9,7 @@ from typing import ParamSpec, TypeVar
 import stackprinter
 
 
+
 def format_npz_samples_filename(start_id: int, num_samples: int) -> str:
     """Format the filename for the samples npz file."""
     # no good way to find a width that works for all cases. Just guessing that 1000000 should be large enough.
@@ -40,7 +41,7 @@ def get_conda_prefix() -> str:
         # on whether the `base` environment is activated.
         default_env_name = os.getenv("CONDA_DEFAULT_ENV", None)
         assert default_env_name is not None, _conda_not_installed_errmsg
-        conda_prefix_env_name = "CONDA_PREFIX" if default_env_name == "base" else "CONDA_PREFIX_1"
+        conda_prefix_env_name = "CONDA_PREFIX" if default_env_name == "bioemu2" else "CONDA_PREFIX_1"
         conda_root = os.getenv(conda_prefix_env_name, None)
     assert conda_root is not None, _conda_not_installed_errmsg
     return conda_root

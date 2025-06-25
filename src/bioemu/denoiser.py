@@ -9,6 +9,9 @@ from torch_geometric.data.batch import Batch
 from .chemgraph import ChemGraph
 from .sde_lib import SDE, CosineVPSDE
 from .so3_sde import SO3SDE, apply_rotvec_to_rotmat
+# from chemgraph import ChemGraph
+# from sde_lib import SDE, CosineVPSDE
+# from so3_sde import SO3SDE, apply_rotvec_to_rotmat
 
 TwoBatches = tuple[Batch, Batch]
 
@@ -108,7 +111,7 @@ class EulerMaruyamaPredictor:
 
 
 def _get_score(
-    batch: ChemGraph, sdes: dict[str, SDE], score_model: torch.nn.Module, t: torch.Tensor
+    batch: ChemGraph, sdes: dict[str, SDE], score_model: torch.nn.Module, t: torch.Tensor, mlcv: torch.Tensor = None,
 ) -> dict[str, torch.Tensor]:
     """
     Calculate predicted score for the batch.
@@ -120,7 +123,7 @@ def _get_score(
           This function converts the score model output to a score.
         t: Diffusion timestep. Shape [batch_size,]
     """
-    tmp = score_model(batch, t)
+    tmp = score_model(batch, t, mlcv=mlcv)
     # Score is in axis angle representation [N,3] (vector is along axis of rotation, vector length
     # is rotation angle in radians).
     assert isinstance(sdes["node_orientations"], SO3SDE)
