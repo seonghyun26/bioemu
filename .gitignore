@@ -131,9 +131,13 @@ cython_debug/
 # Checkpoint files
 *.pth
 *.pt
+*.gz
+*.pdb
 
 *.npz
 *.xtc
 *.ckpt
 *.fasta
 *wandb*
+*res*
+*outputs*

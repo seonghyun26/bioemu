@@ -9,9 +9,6 @@ from torch_geometric.data.batch import Batch
 from .chemgraph import ChemGraph
 from .sde_lib import SDE, CosineVPSDE
 from .so3_sde import SO3SDE, apply_rotvec_to_rotmat
-# from chemgraph import ChemGraph
-# from sde_lib import SDE, CosineVPSDE
-# from so3_sde import SO3SDE, apply_rotvec_to_rotmat
 
 TwoBatches = tuple[Batch, Batch]
 
@@ -111,7 +108,7 @@ class EulerMaruyamaPredictor:
 
 
 def get_score(
-    batch: ChemGraph, sdes: dict[str, SDE], score_model: torch.nn.Module, t: torch.Tensor
+    batch: ChemGraph, sdes: dict[str, SDE], score_model: torch.nn.Module, t: torch.Tensor, mlcv: torch.Tensor = None,
 ) -> dict[str, torch.Tensor]:
     """
     Calculate predicted score for the batch.
@@ -268,6 +265,8 @@ def dpm_solver(
     eps_t: float,
     device: torch.device,
     record_grad_steps: set[int] = set(),
+    mlcv: torch.Tensor = None,
+    condition_mode: str = "none",
 ) -> ChemGraph:
 
     """
@@ -294,6 +293,12 @@ def dpm_solver(
     )
     batch = cast(ChemGraph, batch)  # help out mypy/linter
 
+    # NOTE: MLCV condition on final representation
+    if condition_mode == "backbone" and mlcv is not None:
+        num_graphs = batch.num_graphs
+        mlcv_expanded = mlcv.repeat_interleave(int(batch.batch.shape[0] / num_graphs), dim=0)
+        batch.pos = batch.pos + score_model.model_nn.get_submodule("zero_conv_mlp")(torch.cat([batch.pos, mlcv_expanded], dim=1))
+    
     so3_sde = sdes["node_orientations"]
     assert isinstance(so3_sde, SO3SDE)
     so3_sde.to(device)
@@ -306,7 +311,7 @@ def dpm_solver(
 
         # Evaluate score
         with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
-            score = get_score(batch=batch, t=t, score_model=score_model, sdes=sdes)
+            score = get_score(batch=batch, t=t, score_model=score_model, sdes=sdes, mlcv=mlcv)
         # t_{i-1} in the algorithm is the current t
         batch_idx = batch.batch
         alpha_t, sigma_t = pos_sde.mean_coeff_and_std(x=batch.pos, t=t, batch_idx=batch_idx)

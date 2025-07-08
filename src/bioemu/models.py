@@ -342,6 +342,7 @@ class DistributionalGraphormerControl(nn.Module):
         num_buckets: int = 64,
         max_distance_relative: int = 128,
         dropout: float = 0.1,
+        condition_mode: str = "none",
     ):
         """
         Basic distributional graphormer model. For architecture details, please refer to:
@@ -397,7 +398,9 @@ class DistributionalGraphormerControl(nn.Module):
             n_head=num_heads,
             dim_feedforward=dim_hidden,
             dropout=dropout,
+            condition_mode=condition_mode,
         )
+        self.condition_mode = condition_mode
 
     def forward(
         self,
@@ -456,13 +459,6 @@ class DistributionalGraphormerControl(nn.Module):
 
         # Embed single_repr, noise level "t" and the conditionings from context into x1d.
         x1d = self.x1d_proj(single_repr) + self.step_emb(t)[:, None]  # [B, L, C]
-
-        # NOTE: Embed mlcv into x1d
-        # Embed mlcv into x1d : [B, 1, 1] -> [B, L, C]
-        if mlcv is not None:
-            mlcv_expanded = mlcv.view(x1d.shape[0], 1, 1).expand(-1, x1d.shape[1], x1d.shape[2])
-            x1d = x1d + mlcv_expanded
-
         x2d = self.x2d_proj(pair_repr)  # [B, L, L, C]
 
         pos_sequence = torch.arange(
@@ -484,13 +480,18 @@ class DistributionalGraphormerControl(nn.Module):
             0, 3, 1, 2
         )  # [B, 1, 1, L], this has the value -inf for elements that are masked.
 
+        # NOTE: MLCV condition on input representation, [B, 1, 1] -> [B, L, C]
+        if self.condition_mode == "input" and mlcv is not None:
+            mlcv_expanded = mlcv.unsqueeze(1).repeat(1, x1d.shape[1], 1)
+            x1d = self.get_submodule("zero_conv_mlp")(torch.cat([x1d, mlcv_expanded], dim=2))
+
         # Change in translation and rotation. At this point, both quantities are invariant to global
         # SE(3) transformations.
         (
             T_eps,
             IR_eps,
         ) = self.st_module(  # st_module plays an equivalent role to BackboneUpdate in the Algorithm 20 of AF2 supplement.
-            (T_perturbed, IR_perturbed), x1d, x2d, bias
+            (T_perturbed, IR_perturbed), x1d, x2d, bias, mlcv=mlcv, zero_conv_mlp=self.zero_conv_mlp
         )
 
         # Introduce orientation dependence of the translation score.
@@ -535,22 +536,12 @@ class DiGConditionalScoreModel(torch.nn.Module):
         num_buckets: int = 64,
         max_distance_relative: int = 128,
         dropout: float = 0.1,
+        condition_mode: str = "none",
     ):
         """
         Args: all passed through to DistributionalGraphormer
         """
         super().__init__()
-        # self.model_nn = DistributionalGraphormer(
-        #     dim_model=dim_model,
-        #     dim_pair=dim_pair,
-        #     num_layers=num_layers,
-        #     num_heads=num_heads,
-        #     dim_single_rep=dim_single_rep,
-        #     dim_hidden=dim_hidden,
-        #     num_buckets=num_buckets,
-        #     max_distance_relative=max_distance_relative,
-        #     dropout=dropout,
-        # )
         self.model_nn = DistributionalGraphormerControl(
             dim_model=dim_model,
             dim_pair=dim_pair,
@@ -561,6 +552,7 @@ class DiGConditionalScoreModel(torch.nn.Module):
             num_buckets=num_buckets,
             max_distance_relative=max_distance_relative,
             dropout=dropout,
+            condition_mode=condition_mode,
         )
 
     def forward(self, x: ChemGraph, t: torch.Tensor, mlcv: torch.Tensor = None) -> ChemGraph:

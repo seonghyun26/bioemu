@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 typer_app = typer.Typer(pretty_exceptions_enable=False)
 
 HPACKER_ENVNAME = os.getenv("HPACKER_ENV_NAME", HPACKER_DEFAULT_ENVNAME)
-# HPACKER_ENVNAME = "bioemu2"
 HPACKER_REPO_DIR = os.getenv("HPACKER_REPO_DIR", HPACKER_DEFAULT_REPO_DIR)
 
 
@@ -45,12 +44,13 @@ class MDProtocol(str, Enum):
 def _run_hpacker(protein_pdb_in: str, protein_pdb_out: str) -> None:
     """run hpacker in its environment."""
     # make sure that hpacker env is set up
-    ensure_hpacker_install(envname=HPACKER_ENVNAME, repo_dir=HPACKER_REPO_DIR)
+    # ensure_hpacker_install(envname=HPACKER_ENVNAME, repo_dir=HPACKER_REPO_DIR)
 
     _default_hpacker_pythonbin = os.path.join(
-        get_conda_prefix(),
-        "envs",
-        HPACKER_ENVNAME,
+        "/home/shpark/.conda/envs/hpacker/",
+        # get_conda_prefix(),
+        # "envs",
+        # HPACKER_ENVNAME,
         "bin",
         "python",
     )
@@ -157,8 +157,10 @@ def run_one_md(
     integrator.setConstraintTolerance(0.00001)
 
     try:
-        platform = mm.Platform.getPlatformByName("CUDA")
-        logger.debug("simulation uses CUDA platform")
+        # platform = mm.Platform.getPlatformByName("CUDA")
+        # logger.debug("simulation uses CUDA platform")
+        platform = mm.Platform.getPlatformByName("OpenCL")
+        logger.debug("simulation uses OpenCL platform")
     except Exception:
         # fall back to default
         platform = None
@@ -295,10 +297,12 @@ def main(
 
     # run MD equilibration if requested
     if md_equil:
+        print(f"Running MD equilibration...")
         samples_equil = run_all_md(
             samples_all_heavy, md_protocol, simtime_ns=simtime_ns, outpath=outpath
         )
 
+        print(f"Saving MD equilibration output at {outpath}...")
         samples_equil.save_xtc(os.path.join(outpath, f"{prefix}_md_equil.xtc"))
         samples_equil[0].save_pdb(os.path.join(outpath, f"{prefix}_md_equil.pdb"))
 

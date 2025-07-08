@@ -1,0 +1,8 @@
+id: CLN025
+simulation_id: 0
+feature:
+- alpha carbon distance
+- dihedral angle
+lag: 600
+tica_dim: 2
+model: "20250630_052917"

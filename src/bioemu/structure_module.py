@@ -330,6 +330,7 @@ class StructureModuleControl(nn.Module):
 
     def __init__(self, d_model: int, **kwargs):
         super().__init__()
+        self.condition_mode = kwargs.pop("condition_mode")
         self.encoder = SAEncoderControl(d_model=d_model, **kwargs)
         self.diff_head = DiffHead(ninp=d_model)
 
@@ -340,7 +341,14 @@ class StructureModuleControl(nn.Module):
         x2d: torch.Tensor,
         bias: torch.Tensor,
         mlcv: torch.Tensor = None,
+        zero_conv_mlp: nn.Module = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         x1d = self.encoder(x1d, x2d, pose, bias, mlcv)
-        change = self.diff_head(x1d)
-        return change
+        
+        # NOTE: MLCV condition on final representation, [B, 1, 1] -> [B, L, C]
+        if self.condition_mode == "latent" and mlcv is not None:
+            mlcv_expanded = mlcv.unsqueeze(1).repeat(1, x1d.shape[1], 1)
+            x1d = zero_conv_mlp(torch.cat([x1d, mlcv_expanded], dim=2))
+        
+        res = self.diff_head(x1d)
+        return res
