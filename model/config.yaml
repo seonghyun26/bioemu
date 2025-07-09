@@ -9,7 +9,7 @@ score_model:
   num_buckets: 64
   num_heads: 32
   num_layers: 8
-  condition_mode: none
+  condition_mode: input
 sdes:
   node_orientations:
     _target_: bioemu.shortcuts.DiGSO3SDE

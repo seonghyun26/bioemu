@@ -9,6 +9,8 @@ import yaml
 import lightning
 import argparse
 import torch.nn as nn
+import mdtraj as md
+
 from datetime import datetime
 from pathlib import Path
 from torch_geometric.data import Batch
@@ -49,18 +51,21 @@ os.makedirs(f"model/{date_str}")
 
 def init_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sequence", type=str, default="GYDPETGTWG")
+    parser.add_argument("--sequence", type=str, default="YYDPETGTWY")
     parser.add_argument("--method", type=str, default="ours")
-    parser.add_argument("--learning_rate", type=float, default=1e-5)
+    parser.add_argument("--learning_rate", type=float, default=1e-12)
+    parser.add_argument("--eta_max", type=float, default=1e-6)
     parser.add_argument("--num_epochs", type=int, default=100)
+    parser.add_argument("--warmup_epochs", type=int, default=20)
     parser.add_argument("--batch_size", type=int, default=512)
-    parser.add_argument("--time_lag", type=int, default=5)
+    parser.add_argument("--time_lag", type=int, default=100)
     parser.add_argument("--date", type=str, default=date_str)
-    parser.add_argument("--score_model_mode", type=str, default="train")
+    parser.add_argument("--score_model_mode", type=str, default="eval")
     parser.add_argument("--mlcv_dim", type=int, default=2)
     parser.add_argument("--last_training", type=float, default=1)
     parser.add_argument("--tags", nargs='+',type=str, default=["pilot"])
     parser.add_argument("--condition_type", type=str, default="latent")
+    parser.add_argument("--physical_loss_weight", type=float, default=1.0)
     
     return parser
 
@@ -175,6 +180,64 @@ class VariationalDynamicsEncoder(VariationalAutoEncoderCV):
 
         return elbo_loss + auto_correlation_loss
 
+
+import math
+from torch.optim.lr_scheduler import _LRScheduler
+
+class CosineAnnealingWarmUpRestarts(_LRScheduler):
+    def __init__(self, optimizer, T_0, T_mult=1, eta_max=0.1, T_up=0, gamma=1., last_epoch=-1):
+        if T_0 <= 0 or not isinstance(T_0, int):
+            raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
+        if T_mult < 1 or not isinstance(T_mult, int):
+            raise ValueError("Expected integer T_mult >= 1, but got {}".format(T_mult))
+        if T_up < 0 or not isinstance(T_up, int):
+            raise ValueError("Expected positive integer T_up, but got {}".format(T_up))
+        self.T_0 = T_0
+        self.T_mult = T_mult
+        self.base_eta_max = eta_max
+        self.eta_max = eta_max
+        self.T_up = T_up
+        self.T_i = T_0
+        self.gamma = gamma
+        self.cycle = 0
+        self.T_cur = last_epoch
+        super(CosineAnnealingWarmUpRestarts, self).__init__(optimizer, last_epoch)
+    
+    def get_lr(self):
+        if self.T_cur == -1:
+            return self.base_lrs
+        elif self.T_cur < self.T_up:
+            return [(self.eta_max - base_lr)*self.T_cur / self.T_up + base_lr for base_lr in self.base_lrs]
+        else:
+            return [base_lr + (self.eta_max - base_lr) * (1 + math.cos(math.pi * (self.T_cur-self.T_up) / (self.T_i - self.T_up))) / 2
+                    for base_lr in self.base_lrs]
+
+    def step(self, epoch=None):
+        if epoch is None:
+            epoch = self.last_epoch + 1
+            self.T_cur = self.T_cur + 1
+            if self.T_cur >= self.T_i:
+                self.cycle += 1
+                self.T_cur = self.T_cur - self.T_i
+                self.T_i = (self.T_i - self.T_up) * self.T_mult + self.T_up
+        else:
+            if epoch >= self.T_0:
+                if self.T_mult == 1:
+                    self.T_cur = epoch % self.T_0
+                    self.cycle = epoch // self.T_0
+                else:
+                    n = int(math.log((epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult))
+                    self.cycle = n
+                    self.T_cur = epoch - self.T_0 * (self.T_mult ** n - 1) / (self.T_mult - 1)
+                    self.T_i = self.T_0 * self.T_mult ** (n)
+            else:
+                self.T_i = self.T_0
+                self.T_cur = epoch
+                
+        self.eta_max = self.base_eta_max * (self.gamma**self.cycle)
+        self.last_epoch = math.floor(epoch)
+        for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+            param_group['lr'] = lr
 def load_data(
     simulation_idx=0,
     # time_lag=5,
@@ -236,6 +299,56 @@ def kabsch_rmsd_loss(
     
     return kabsch_loss
 
+def unphysical_loss(
+    x0_pos: torch.Tensor,
+    max_ca_seq_distance: float = 4.5,
+    max_cn_seq_distance: float = 2.0,
+    clash_distance: float = 1.0,
+) -> torch.Tensor:
+    # pdb_path = "/home/shpark/prj-mlcv/lib/bioemu/topology-backbone.pdb"
+    # with open(pdb_path, "r") as f:
+    #     pdb_lines = f.readlines()
+    # traj = md.load_pdb(pdb_path)
+    # traj.xyz = x0_pos.clone().cpu().detach().numpy()
+
+    # ca_indices = [4, 25, 46, 60, 72, 87, 101, 108, 122, 146]
+    # c_indices = [5, 26, 47, 61, 73, 88, 102, 109, 123, 147]
+    # n_indices = [6, 27, 48, 62, 74, 89, 103, 110, 124, 148]
+    # max_ca_seq_distance = 1.54
+    # max_cn_seq_distance = 1.33
+    # clash_distance = 1.9
+    
+    n = x0_pos.shape[0]
+    diffs = x0_pos.unsqueeze(1) - x0_pos.unsqueeze(0)  # shape: (n, n, 3)
+    dists = torch.norm(diffs, dim=-1)  # shape: (n, n
+    mask = ~torch.eye(n, dtype=torch.bool, device=x0_pos.device)
+    contact_loss = torch.nn.functional.relu(dists - max_ca_seq_distance)
+    loss_ca = contact_loss[mask].pow(2).mean()
+
+    # # C-N peptide bond distance
+    # cn_dists = torch.norm(
+    #     xyz[:, c_indices] - xyz[:, n_indices], dim=-1
+    # )
+    # loss_cn = torch.nn.functional.relu(cn_dists - max_cn_seq_distance).pow(2).mean()
+    loss_cn = 0
+
+    # # Clash penalty
+    # # Compute full distance matrix (B, N, N)
+    # diff = xyz[:, :, None, :] - xyz[:, None, :, :]
+    # dists = torch.norm(diff, dim=-1)
+
+    # # Mask out intra-residue distances
+    # same_res = torch.eye(xyz.shape[0], dtype=torch.bool, device = device)
+    # clash_mask = torch.logical_not(same_res).to(device)
+
+    # # Apply clash penalty
+    # clash_penalty = torch.nn.functional.relu(clash_distance - dists)
+    # clash_penalty = clash_penalty * clash_mask  # ignore same-residue
+    # loss_clash = clash_penalty.pow(2).mean()
+    loss_clash = 0
+    
+    return loss_ca, loss_cn, loss_clash
+
 
 # NOTE: Fine-tuning in ppft matter
 def calc_tlc_loss(
@@ -274,8 +387,10 @@ def calc_tlc_loss(
         loss = loss + kabsch_rmsd_loss(x0_pos, target_pos, system_id)
     
     loss = loss / (num_graphs * n_replications)
+    
+    loss_ca, loss_cn, loss_clash = unphysical_loss(x0_pos)
 
-    return loss
+    return loss, loss_ca, loss_cn, loss_clash
 
 
 def _rollout(
@@ -430,7 +545,7 @@ def main():
     score_model.model_nn.add_module(f"zero_conv_mlp", nn.Sequential(
         nn.Linear(hidden_dim + mlcv_dim, hidden_dim),
         nn.ReLU(),
-        nn.Linear(hidden_dim, hidden_dim),
+        # nn.Linear(hidden_dim, hidden_dim),
     ))
     
     # Load MLCV model
@@ -457,7 +572,8 @@ def main():
         optimizer = torch.optim.AdamW(list(mlcv_model.parameters()) + list(score_model.parameters()), lr=learning_rate)
     else:
         raise ValueError(f"Score model mode {args.score_model_mode} not supported")
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
+    scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=num_epochs, T_mult=1, eta_max=args.eta_max, T_up=args.warmup_epochs, gamma=0.5)
     
     # Load simulation data
     time_lag = args.time_lag
@@ -488,6 +604,9 @@ def main():
     )
     for epoch in pbar:
         total_loss = 0
+        total_loss_ca = 0
+        total_loss_cn = 0
+        total_loss_clash = 0
         if epoch > args.last_training * num_epochs:
             score_model.train()
         else:
@@ -503,7 +622,7 @@ def main():
             batch_data_ca_distance_timelag = batch["timelag_pos"]
             mlcv = mlcv_model(batch_data_ca_distance)
 
-            loss = calc_tlc_loss(
+            loss, loss_ca, loss_cn, loss_clash = calc_tlc_loss(
                 score_model=score_model,
                 mlcv=mlcv,
                 target=batch_data_ca_distance_timelag,
@@ -514,10 +633,14 @@ def main():
                 N_rollout=N_rollout,
                 condition_mode=args.condition_type,
             )
-            loss.backward()
             optimizer.step()
 
             total_loss = total_loss + loss
+            total_loss_ca = total_loss_ca + loss_ca
+            total_loss_cn = total_loss_cn + loss_cn
+            total_loss_clash = total_loss_clash + loss_clash
+            loss_all = loss + args.physical_loss_weight * (loss_ca + loss_cn + loss_clash)
+            loss_all.backward()
         
         scheduler.step()
         # Print epoch statistics
@@ -525,6 +648,9 @@ def main():
         current_lr = optimizer.param_groups[0]['lr']
         wandb.log({
             "loss": total_loss/num_batches,
+            "loss_ca": total_loss_ca/num_batches,
+            "loss_cn": total_loss_cn/num_batches,
+            "loss_clash": total_loss_clash/num_batches,
             "lr": current_lr,
             "epoch": epoch,
             "score_model_mode_status": score_model.training,

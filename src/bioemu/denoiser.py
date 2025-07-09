@@ -108,7 +108,11 @@ class EulerMaruyamaPredictor:
 
 
 def get_score(
-    batch: ChemGraph, sdes: dict[str, SDE], score_model: torch.nn.Module, t: torch.Tensor, mlcv: torch.Tensor = None,
+    batch: ChemGraph,
+    sdes: dict[str, SDE],
+    score_model: torch.nn.Module,
+    t: torch.Tensor,
+    mlcv: torch.Tensor = None,
 ) -> dict[str, torch.Tensor]:
     """
     Calculate predicted score for the batch.
@@ -267,6 +271,8 @@ def dpm_solver(
     record_grad_steps: set[int] = set(),
     mlcv: torch.Tensor = None,
     condition_mode: str = "none",
+    uncond_score_model: torch.nn.Module = None,
+    cfg_lambda: float = 1.0,
 ) -> ChemGraph:
 
     """
@@ -282,6 +288,8 @@ def dpm_solver(
     if isinstance(score_model, torch.nn.Module):
         # permits unit-testing with dummy model
         score_model = score_model.to(device)
+    if uncond_score_model is not None:
+        uncond_score_model = uncond_score_model.to(device)
     pos_sde = sdes["pos"]
     assert isinstance(pos_sde, CosineVPSDE)
 
@@ -311,7 +319,14 @@ def dpm_solver(
 
         # Evaluate score
         with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
-            score = get_score(batch=batch, t=t, score_model=score_model, sdes=sdes, mlcv=mlcv)
+            score = get_score(batch=batch, t=t, score_model=score_model, sdes=sdes, mlcv=mlcv, )
+            
+            # NOTE: CFG with uncond score and cond score
+            if uncond_score_model is not None:
+                uncond_score = get_score(batch=batch, t=t, score_model=uncond_score_model, sdes=sdes, mlcv=mlcv, )
+                score['node_orientations'] = (1 + cfg_lambda) * uncond_score['node_orientations'] - cfg_lambda * score['node_orientations']
+                score['pos'] = (1 + cfg_lambda) * uncond_score['pos'] - cfg_lambda * score['pos']
+
         # t_{i-1} in the algorithm is the current t
         batch_idx = batch.batch
         alpha_t, sigma_t = pos_sde.mean_coeff_and_std(x=batch.pos, t=t, batch_idx=batch_idx)

@@ -147,12 +147,10 @@ def main(
     ckpt_path, model_config_path = maybe_download_checkpoint(
         model_name=model_name, ckpt_path=ckpt_path, model_config_path=model_config_path
     )
-    # score_model = load_model(ckpt_path, model_config_path)
     with open(model_config_path) as f:
         model_config = yaml.safe_load(f)
-    model_state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    model_config["score_model"]["condition_mode"] = condition_mode
     score_model: DiGConditionalScoreModel = hydra.utils.instantiate(model_config["score_model"])
-    # score_model.load_state_dict(model_state)
     
     # NOTE: Load fine-tuned score model
     if condition_mode == "input" or condition_mode == "latent":
@@ -164,7 +162,7 @@ def main(
     score_model.model_nn.add_module(f"zero_conv_mlp", nn.Sequential(
         nn.Linear(hidden_dim + mlcv_dim, hidden_dim),
         nn.ReLU(),
-        nn.Linear(hidden_dim, hidden_dim),
+        # nn.Linear(hidden_dim, hidden_dim),
     ))
     cond_ft_model = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/checkpoint_100.pt"
     cond_ft_model_state = torch.load(cond_ft_model, map_location="cpu", weights_only=True)
@@ -195,7 +193,6 @@ def main(
     else:
         raise ValueError(f"Invalid method: {method}")
     cond_mlcv = mlcv_model(torch.from_numpy(mlcv_feature).to(device))
-
 
 
     sdes = load_sdes(model_config_path=model_config_path, cache_so3_dir=cache_so3_dir)
@@ -268,6 +265,7 @@ def main(
             msa_file=msa_file,
             msa_host_url=msa_host_url,
             mlcv=cond_mlcv_expanded,
+            condition_mode=condition_mode,
         )
         batch = {k: v.cpu().numpy() for k, v in batch.items()}
         np.savez(npz_path, **batch, sequence=sequence)
@@ -346,6 +344,8 @@ def generate_batch(
     msa_file: str | Path | None = None,
     msa_host_url: str | None = None,
     mlcv: torch.Tensor = None,
+    condition_mode: str = "none",
+    uncond_score_model: torch.nn.Module | None = None,
 ) -> dict[str, torch.Tensor]:
     """Generate one batch of samples, using GPU if available.
 
@@ -377,6 +377,8 @@ def generate_batch(
         batch=context_batch,
         score_model=score_model,
         mlcv=mlcv,
+        condition_mode=condition_mode,
+        uncond_score_model=uncond_score_model,
     )
     assert isinstance(sampled_chemgraph_batch, Batch)
     sampled_chemgraphs = sampled_chemgraph_batch.to_data_list()

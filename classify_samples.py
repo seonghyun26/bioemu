@@ -1,9 +1,10 @@
-import os
+import wandb
 import argparse
 
 import numpy as np
 import mdtraj as md
 import nglview as nv
+import matplotlib.pyplot as plt
 
 
 def init_parser():
@@ -109,10 +110,22 @@ def main():
     method = args.method
     date = args.date
     res_dir = f"cln025-{method}-{date}"
+    
+    wandb.init(
+      project="bioemu-sample",
+      entity="eddy26",
+      config=args,
+      name=f"{method}-{date}"
+      )
 
-    xtc_path = f"/home/shpark/prj-mlcv/lib/bioemu/res/{res_dir}/samples_md_equil.xtc"
-    pdb_path = f"/home/shpark/prj-mlcv/lib/bioemu/res/{res_dir}/samples_md_equil.pdb"
-    traj = md.load(xtc_path, top=pdb_path)
+    xtc_path = f"/home/shpark/prj-mlcv/lib/bioemu/res/{res_dir}/samples_sidechain_rec.xtc"
+    pdb_path = f"/home/shpark/prj-mlcv/lib/bioemu/res/{res_dir}/samples_sidechain_rec.pdb"
+    all_samples_traj = md.load(xtc_path, top=pdb_path)
+    print(all_samples_traj)
+
+    samples_xtc_path = f"/home/shpark/prj-mlcv/lib/bioemu/res/{res_dir}/samples_md_equil.xtc"
+    samples_pdb_path = f"/home/shpark/prj-mlcv/lib/bioemu/res/{res_dir}/samples_md_equil.pdb"
+    traj = md.load(samples_xtc_path, top=samples_pdb_path)
     print(traj)
     
     label, bond_sum = foldedness_by_hbond(traj)
@@ -129,8 +142,26 @@ def main():
         if value == 2:
             print("-"*30)
     print("=" * 40)
-    
 
+    # Draw histogram of bond_sum
+    plt.figure(figsize=(8, 5))
+    plt.hist(bond_sum, bins=np.arange(bond_sum.min(), bond_sum.max()+2)-0.5, edgecolor='black')
+    plt.xlabel('Bond Sum')
+    plt.ylabel('Number of Frames')
+    plt.title('Histogram of Bond Sum')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+    
+    
+    wandb.log({
+        "valid_samples": label.shape[0],
+        "folded_states": label.sum(),
+        "unfolded_states": label.shape[0] - label.sum(),
+        "folded_percentage": label.sum() / label.shape[0] * 100,
+        "bond_sum_histogram": wandb.Image(plt.gcf()),
+    })
+    wandb.finish()
 
 if __name__ == "__main__":
     main()

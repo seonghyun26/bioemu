@@ -12,7 +12,7 @@ CUDA_VISIBLE_DEVICES=$1 python -m bioemu.sample-cond \
     --mlcv_dim 2 \
     --method $method \
     --date $date \
-    --condition_mode latent
+    --condition_mode input
 
 CUDA_VISIBLE_DEVICES=$1 python -m bioemu.sidechain_relax \
     --pdb-path /home/shpark/prj-mlcv/lib/bioemu/res/cln025-$method-$date/topology.pdb \
