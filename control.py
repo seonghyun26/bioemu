@@ -1,6 +1,4 @@
-import logging
 import os
-import typing
 import wandb
 import hydra
 import numpy as np
@@ -10,14 +8,17 @@ import lightning
 import argparse
 import torch.nn as nn
 import mdtraj as md
+import math
 
 from datetime import datetime
 from pathlib import Path
 from torch_geometric.data import Batch
 from tqdm import tqdm
 from typing import Optional
+
 from torch.optim import Adam, AdamW
 from torch.utils.data import Dataset, DataLoader
+from torch.optim.lr_scheduler import _LRScheduler
 
 from bioemu.chemgraph import ChemGraph
 from bioemu.sample import get_context_chemgraph
@@ -44,17 +45,20 @@ repo_dir = Path("~/prj-mlcv/lib/bioemu").expanduser()
 rollout_config_path = repo_dir / "notebook" / "rollout.yaml"
 
 seed = 0
+WANDB_WATCH_FREQ = 10
 torch.manual_seed(seed)
-date_str = datetime.now().strftime("%m%d_%H%M")
+date_str = datetime.now().strftime("%m%d_%H%M%S")
 os.makedirs(f"model/{date_str}")
+
+cln025_alpha_carbon_idx = [4, 25, 46, 60, 72, 87, 101, 108, 122, 146]
 
 
 def init_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sequence", type=str, default="YYDPETGTWY")
     parser.add_argument("--method", type=str, default="ours")
-    parser.add_argument("--learning_rate", type=float, default=1e-12)
-    parser.add_argument("--eta_max", type=float, default=1e-6)
+    parser.add_argument("--learning_rate", type=float, default=1e-10)
+    parser.add_argument("--eta_max", type=float, default=1e-4)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--warmup_epochs", type=int, default=20)
     parser.add_argument("--batch_size", type=int, default=512)
@@ -65,7 +69,7 @@ def init_parser():
     parser.add_argument("--last_training", type=float, default=1)
     parser.add_argument("--tags", nargs='+',type=str, default=["pilot"])
     parser.add_argument("--condition_type", type=str, default="latent")
-    parser.add_argument("--physical_loss_weight", type=float, default=1.0)
+    parser.add_argument("--physical_loss_weight", type=float, default=0.0)
     
     return parser
 
@@ -92,6 +96,13 @@ class MLCV(BaseCV, lightning.LightningModule):
         # initialize encoder
         o = "encoder"
         self.encoder = FeedForward(encoder_layers, **options[o])
+
+    # def forward_cv(self, x: torch.Tensor) -> torch.Tensor:
+    #     """Evaluate the CV without pre or post/processing modules."""
+    #     if self.norm_in is not None:
+    #         x = self.norm_in(x)
+    #     x = self.encoder(x)
+    #     return x
 
 
 class VDELoss(torch.nn.Module):
@@ -181,8 +192,7 @@ class VariationalDynamicsEncoder(VariationalAutoEncoderCV):
         return elbo_loss + auto_correlation_loss
 
 
-import math
-from torch.optim.lr_scheduler import _LRScheduler
+
 
 class CosineAnnealingWarmUpRestarts(_LRScheduler):
     def __init__(self, optimizer, T_0, T_mult=1, eta_max=0.1, T_up=0, gamma=1., last_epoch=-1):
@@ -238,6 +248,8 @@ class CosineAnnealingWarmUpRestarts(_LRScheduler):
         self.last_epoch = math.floor(epoch)
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
+
+
 def load_data(
     simulation_idx=0,
     # time_lag=5,
@@ -278,26 +290,7 @@ def kabsch_rmsd(
     rmsd = (P_aligned - Q).square().sum(-1).mean(-1).sqrt()
     
     return rmsd
-    
-def kabsch_rmsd_loss(
-    x0_pos: torch.Tensor,
-    target_pos: torch.Tensor,
-    system_id: str,
-) -> torch.Tensor:
-    """
-    Compute the Kabsch RMSD loss between two sets of positions.
-    
-    """
-    if system_id == "CLN025":
-        alpha_carbon_idx = [4, 25, 46, 60, 72, 87, 101, 108, 122, 146]
-        target_alpha_carbon_pos = target_pos[alpha_carbon_idx]
-    
-    else:
-        raise ValueError(f"System ID {system_id} not supported")
-    
-    kabsch_loss = kabsch_rmsd(x0_pos, target_alpha_carbon_pos)
-    
-    return kabsch_loss
+
 
 def unphysical_loss(
     x0_pos: torch.Tensor,
@@ -376,21 +369,19 @@ def calc_tlc_loss(
         mlcv=mlcv,
         condition_mode=condition_mode,
     )
+    num_systems_sampled = len(batch)
 
     loss = torch.tensor(0.0, device=device)
-    num_graphs = len(batch)
-    system_size = batch[0].pos.shape[0]
-    system_id = batch[0].system_id
-    for i in range(num_graphs):
-        x0_pos = x0.pos[i * system_size : (i+1) * system_size]
-        target_pos = target[i]
-        loss = loss + kabsch_rmsd_loss(x0_pos, target_pos, system_id)
+    for i in range(num_systems_sampled):
+        single_system_batch: list[ChemGraph] = x0.get_example(i)
+        target_pos = target[i][cln025_alpha_carbon_idx]
+        loss = loss + kabsch_rmsd(single_system_batch.pos, target_pos)
+        
     
-    loss = loss / (num_graphs * n_replications)
-    
-    loss_ca, loss_cn, loss_clash = unphysical_loss(x0_pos)
+    loss = loss / (num_systems_sampled)
+    # loss_ca, loss_cn, loss_clash = unphysical_loss(x0_pos)
 
-    return loss, loss_ca, loss_cn, loss_clash
+    return loss
 
 
 def _rollout(
@@ -400,7 +391,7 @@ def _rollout(
     mid_t: float,
     N_rollout: int,
     device: torch.device,
-    mlcv: torch.Tensor = None,
+    mlcv: torch.Tensor,
     condition_mode: str = "none",
 ):
     """Fast rollout to get a sampled structure in a small number of steps.
@@ -408,7 +399,7 @@ def _rollout(
     because the orientations are not used to compute foldedness.
     """
     batch_size = batch.num_graphs
-
+    
     # Perform a few denoising steps to get a partially denoised sample `x_mid`.
     x_mid: ChemGraph = dpm_solver(
         sdes=sdes,
@@ -425,9 +416,9 @@ def _rollout(
     # Predict clean x (x0) from x_mid in a single jump.
     # This step is always with gradient.
     mid_t_expanded = torch.full((batch_size,), mid_t, device=device)
-    score_mid_t = get_score(batch=x_mid, sdes=sdes, t=mid_t_expanded, score_model=score_model)[
-        "pos"
-    ]
+    score_mid_t = get_score(
+        batch=x_mid, sdes=sdes, t=mid_t_expanded, score_model=score_model, mlcv=mlcv,
+    )["pos"]
 
     # No need to compute orientations, because they are not used to compute foldedness.
     x0_pos = _get_x0_given_xt_and_score(
@@ -529,9 +520,15 @@ def main():
     sdes: dict[str, SDE] = hydra.utils.instantiate(model_config["sdes"])
     if args.score_model_mode == "train":
         score_model.train()
-    else:
+    elif args.score_model_mode == "eval":
         score_model.eval()
-    wandb.watch(score_model)
+    else:
+        raise ValueError(f"Score model mode {args.score_model_mode} not supported")
+    wandb.watch(
+        score_model,
+        log="all",
+        log_freq=WANDB_WATCH_FREQ,
+    )
     
     # NOTE: trail, add zero conv MLP to score model
     # hidden_dim = 512
@@ -547,6 +544,8 @@ def main():
         nn.ReLU(),
         # nn.Linear(hidden_dim, hidden_dim),
     ))
+    for p in score_model.parameters():
+        p.requires_grad = True
     
     # Load MLCV model
     if method == "ours" or method == "debug":
@@ -557,7 +556,15 @@ def main():
         mlcv_model = load_vde().to(device)
     else:
         raise ValueError(f"Method {method} not supported")
+    mlcv_model.train()
+    for p in mlcv_model.parameters():
+        p.requires_grad = True
     print(mlcv_model)
+    wandb.watch(
+        mlcv_model,
+        log="all",
+        log_freq=WANDB_WATCH_FREQ,
+    )
     
     # Load config
     rollout_config = yaml.safe_load(rollout_config_path.read_text())
@@ -572,6 +579,7 @@ def main():
         optimizer = torch.optim.AdamW(list(mlcv_model.parameters()) + list(score_model.parameters()), lr=learning_rate)
     else:
         raise ValueError(f"Score model mode {args.score_model_mode} not supported")
+    # optimizer = torch.optim.AdamW(mlcv_model.parameters(), lr=learning_rate)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=num_epochs, T_mult=1, eta_max=args.eta_max, T_up=args.warmup_epochs, gamma=0.5)
     
@@ -604,9 +612,6 @@ def main():
     )
     for epoch in pbar:
         total_loss = 0
-        total_loss_ca = 0
-        total_loss_cn = 0
-        total_loss_clash = 0
         if epoch > args.last_training * num_epochs:
             score_model.train()
         else:
@@ -618,11 +623,12 @@ def main():
             total=len(dataloader),
             leave=False,
         ):
+            optimizer.zero_grad()
             batch_data_ca_distance = batch["ca_distance"]
             batch_data_ca_distance_timelag = batch["timelag_pos"]
             mlcv = mlcv_model(batch_data_ca_distance)
 
-            loss, loss_ca, loss_cn, loss_clash = calc_tlc_loss(
+            loss = calc_tlc_loss(
                 score_model=score_model,
                 mlcv=mlcv,
                 target=batch_data_ca_distance_timelag,
@@ -633,14 +639,10 @@ def main():
                 N_rollout=N_rollout,
                 condition_mode=args.condition_type,
             )
-            optimizer.step()
-
             total_loss = total_loss + loss
-            total_loss_ca = total_loss_ca + loss_ca
-            total_loss_cn = total_loss_cn + loss_cn
-            total_loss_clash = total_loss_clash + loss_clash
-            loss_all = loss + args.physical_loss_weight * (loss_ca + loss_cn + loss_clash)
-            loss_all.backward()
+            loss.backward()
+            optimizer.step()
+            
         
         scheduler.step()
         # Print epoch statistics
@@ -648,9 +650,6 @@ def main():
         current_lr = optimizer.param_groups[0]['lr']
         wandb.log({
             "loss": total_loss/num_batches,
-            "loss_ca": total_loss_ca/num_batches,
-            "loss_cn": total_loss_cn/num_batches,
-            "loss_clash": total_loss_clash/num_batches,
             "lr": current_lr,
             "epoch": epoch,
             "score_model_mode_status": score_model.training,

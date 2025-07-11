@@ -1,5 +1,5 @@
-method=$2
-date=$3
+method=ours
+date=0711_072001
 num_samples=100
 
 cd ../

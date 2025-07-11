@@ -365,9 +365,12 @@ def _get_physical_traj_indices(
     ) = _filter_unphysical_traj_masks(
         traj, max_ca_seq_distance, max_cn_seq_distance, clash_distance
     )
+    print(f"frames_match_ca_seq_distance: {frames_match_ca_seq_distance.sum()}")
+    print(f"frames_match_cn_seq_distance: {frames_match_cn_seq_distance.sum()}")
+    print(f"frames_non_clash: {frames_non_clash.sum()}")
     matches_all = frames_match_ca_seq_distance & frames_match_cn_seq_distance & frames_non_clash
     if strict:
-        assert matches_all.sum() > 0, "Ended up with empty trajectory"
+        assert matches_all.sum() <= 0, "Ended up with empty trajectory"
     return np.where(matches_all)[0]
 
 

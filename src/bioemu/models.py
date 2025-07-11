@@ -409,7 +409,7 @@ class DistributionalGraphormerControl(nn.Module):
         batch_index: torch.Tensor,
         t: torch.Tensor,
         context: ChemGraph,
-        mlcv: torch.Tensor = None,
+        mlcv: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Predict translation and rotation scores based on noisy positions and node orientations.
@@ -482,25 +482,18 @@ class DistributionalGraphormerControl(nn.Module):
 
         # NOTE: MLCV condition on input representation, [B, 1, 1] -> [B, L, C]
         if self.condition_mode == "input" and mlcv is not None:
-            mlcv_expanded = mlcv.unsqueeze(1).repeat(1, x1d.shape[1], 1)
-            x1d = self.get_submodule("zero_conv_mlp")(torch.cat([x1d, mlcv_expanded], dim=2))
+            mlcv_expanded = mlcv.reshape(x1d.shape[0], 1, -1).expand(-1, x1d.shape[1], -1)
+            x1d_with_condition = torch.cat([x1d, mlcv_expanded], dim=2)
+            x1d_conditioned = self.get_submodule("zero_conv_mlp")(x1d_with_condition)
 
         # Change in translation and rotation. At this point, both quantities are invariant to global
         # SE(3) transformations.
-        if self.condition_mode == "latent" and mlcv is not None:
-            (
-                T_eps,
-                IR_eps,
-            ) = self.st_module(  # st_module plays an equivalent role to BackboneUpdate in the Algorithm 20 of AF2 supplement.
-                (T_perturbed, IR_perturbed), x1d, x2d, bias, mlcv=mlcv, zero_conv_mlp=self.zero_conv_mlp
-            )
-        else:
-            (
-                T_eps,
-                IR_eps,
-            ) = self.st_module(  # st_module plays an equivalent role to BackboneUpdate in the Algorithm 20 of AF2 supplement.
-                (T_perturbed, IR_perturbed), x1d, x2d, bias, mlcv=mlcv
-            )
+        (
+            T_eps,
+            IR_eps,
+        ) = self.st_module(  # st_module plays an equivalent role to BackboneUpdate in the Algorithm 20 of AF2 supplement.
+            (T_perturbed, IR_perturbed), x1d_conditioned, x2d, bias, mlcv=mlcv
+        )
 
         # Introduce orientation dependence of the translation score.
         T_eps = torch.matmul(IR_perturbed.transpose(-1, -2), T_eps.unsqueeze(-1)).squeeze(-1)
@@ -563,7 +556,7 @@ class DiGConditionalScoreModel(torch.nn.Module):
             condition_mode=condition_mode,
         )
 
-    def forward(self, x: ChemGraph, t: torch.Tensor, mlcv: torch.Tensor = None) -> ChemGraph:
+    def forward(self, x: ChemGraph, t: torch.Tensor, mlcv: torch.Tensor) -> ChemGraph:
         # NOTE: the DiG structure model uses a time embedding intended for integer time
         # steps between 0 and num_timesteps (1000 by default). The SDE gets times between
         # 0 and 1, where the filter used in the embedding is less expressive. To avoid

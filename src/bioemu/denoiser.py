@@ -112,7 +112,7 @@ def get_score(
     sdes: dict[str, SDE],
     score_model: torch.nn.Module,
     t: torch.Tensor,
-    mlcv: torch.Tensor = None,
+    mlcv: torch.Tensor,
 ) -> dict[str, torch.Tensor]:
     """
     Calculate predicted score for the batch.
@@ -268,8 +268,8 @@ def dpm_solver(
     max_t: float,
     eps_t: float,
     device: torch.device,
+    mlcv: torch.Tensor,
     record_grad_steps: set[int] = set(),
-    mlcv: torch.Tensor = None,
     condition_mode: str = "none",
     uncond_score_model: torch.nn.Module = None,
     cfg_lambda: float = 1.0,
@@ -319,7 +319,13 @@ def dpm_solver(
 
         # Evaluate score
         with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
-            score = get_score(batch=batch, t=t, score_model=score_model, sdes=sdes, mlcv=mlcv, )
+            score = get_score(
+                batch=batch,
+                t=t,
+                score_model=score_model,
+                sdes=sdes,
+                mlcv=mlcv,
+            )
             
             # NOTE: CFG with uncond score and cond score
             if uncond_score_model is not None:
@@ -385,7 +391,7 @@ def dpm_solver(
         # Correction step
         # Evaluate score at updated pos and node orientations
         with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
-            score_u = get_score(batch=batch_u, t=t_lambda, sdes=sdes, score_model=score_model)
+            score_u = get_score(batch=batch_u, t=t_lambda, sdes=sdes, score_model=score_model, mlcv=mlcv)
 
         pos_next = (
             alpha_t_next / alpha_t * batch.pos
