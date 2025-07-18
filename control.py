@@ -15,6 +15,7 @@ from pathlib import Path
 from torch_geometric.data import Batch
 from tqdm import tqdm
 from typing import Optional
+from itertools import combinations
 
 from torch.optim import Adam, AdamW
 from torch.utils.data import Dataset, DataLoader
@@ -34,6 +35,7 @@ from bioemu.so3_sde import SO3SDE
 from mlcolvar.cvs import BaseCV, DeepTDA, VariationalAutoEncoderCV
 from mlcolvar.core import FeedForward, Normalization
 from mlcolvar.core.loss.elbo import elbo_gaussians_loss
+from mlcolvar.core.transform import Transform
 
 
 # SINGLE_EMBED_FILE = "/home/shpark/.bioemu_embeds_cache/539b322bacb5376ca1c0a5ccad3196eb77b38dae8a09ae4a6cb83f40826936a7_single.npy"
@@ -47,38 +49,61 @@ rollout_config_path = repo_dir / "notebook" / "rollout.yaml"
 seed = 0
 WANDB_WATCH_FREQ = 10
 torch.manual_seed(seed)
-date_str = datetime.now().strftime("%m%d_%H%M%S")
-os.makedirs(f"model/{date_str}")
+
 
 cln025_alpha_carbon_idx = [4, 25, 46, 60, 72, 87, 101, 108, 122, 146]
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def init_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sequence", type=str, default="YYDPETGTWY")
     parser.add_argument("--method", type=str, default="ours")
     parser.add_argument("--learning_rate", type=float, default=1e-10)
-    parser.add_argument("--eta_max", type=float, default=1e-4)
+    parser.add_argument("--eta_max", type=float, default=1e-3)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--warmup_epochs", type=int, default=20)
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--time_lag", type=int, default=100)
-    parser.add_argument("--date", type=str, default=date_str)
+    parser.add_argument("--date", type=str, default="debug")
     parser.add_argument("--score_model_mode", type=str, default="eval")
     parser.add_argument("--mlcv_dim", type=int, default=2)
     parser.add_argument("--last_training", type=float, default=1)
     parser.add_argument("--tags", nargs='+',type=str, default=["pilot"])
-    parser.add_argument("--condition_type", type=str, default="latent")
+    parser.add_argument("--condition_mode", type=str, default="latent")
     parser.add_argument("--physical_loss_weight", type=float, default=0.0)
+    parser.add_argument("--param_watch", type=str2bool, default=False)
     
     return parser
 
+
+class DIM_NORMALIZATION(Transform):
+    def __init__(
+        self,
+        feature_dim = 1
+    ):
+        super().__init__(in_features=feature_dim, out_features=feature_dim)
+        self.register_buffer("feature_dim", torch.tensor(feature_dim))
+        
+    def forward(self, x):
+        x = torch.nn.functional.normalize(x, dim=-1)
+        return x
+    
 
 class MLCV(BaseCV, lightning.LightningModule):
     BLOCKS = ["norm_in", "encoder",]
 
     def __init__(
         self,
+        mlcv_dim: int,
         encoder_layers: list,
         options: dict = None,
         **kwargs,
@@ -96,13 +121,7 @@ class MLCV(BaseCV, lightning.LightningModule):
         # initialize encoder
         o = "encoder"
         self.encoder = FeedForward(encoder_layers, **options[o])
-
-    # def forward_cv(self, x: torch.Tensor) -> torch.Tensor:
-    #     """Evaluate the CV without pre or post/processing modules."""
-    #     if self.norm_in is not None:
-    #         x = self.norm_in(x)
-    #     x = self.encoder(x)
-    #     return x
+        self.postprocessing = DIM_NORMALIZATION(mlcv_dim)
 
 
 class VDELoss(torch.nn.Module):
@@ -254,12 +273,14 @@ def load_data(
     simulation_idx=0,
     # time_lag=5,
 ):
-    cln025_cad_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_CLN025-{simulation_idx}-protein/CLN025-{simulation_idx}-CAdistance-switch.pt"
-    cln025_pos_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_CLN025-{simulation_idx}-protein/CLN025-{simulation_idx}-coordinates.pt"
-    ca_distance_data = torch.load(cln025_cad_path)
-    pos_data = torch.load(cln025_pos_path)
+    # cln025_cad_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_CLN025-{simulation_idx}-protein/CLN025-{simulation_idx}-CAdistance-mdtraj.pt"
+    # cln025_pos_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_CLN025-{simulation_idx}-protein/CLN025-{simulation_idx}-CAdistance-mdtraj.pt"
+    current_data_path = "/home/shpark/prj-mlcv/lib/DESRES/dataset/CLN025-current-cad.pt"
+    timelag_data_path = "/home/shpark/prj-mlcv/lib/DESRES/dataset/CLN025-timelagged-cad.pt"
+    current_data = torch.load(current_data_path)
+    timelag_data = torch.load(timelag_data_path)
     
-    return ca_distance_data, pos_data
+    return current_data, timelag_data
     
     
 def kabsch_rmsd(
@@ -372,16 +393,41 @@ def calc_tlc_loss(
     num_systems_sampled = len(batch)
 
     loss = torch.tensor(0.0, device=device)
-    for i in range(num_systems_sampled):
-        single_system_batch: list[ChemGraph] = x0.get_example(i)
-        target_pos = target[i][cln025_alpha_carbon_idx]
-        loss = loss + kabsch_rmsd(single_system_batch.pos, target_pos)
+    ca_seq_distances  = torch.tensor(0.0, device=device)
+    tar_seq_distances_sum = torch.tensor(0.0, device=device)
+    dummy_traj = md.load(
+        "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025.pdb"
+    )
+    ca_resid_pair = np.array(
+        [(a.index, b.index) for a, b in combinations(list(dummy_traj.topology.residues), 2)]
+    )
+    for system_idx in range(num_systems_sampled):
+        single_system_batch: list[ChemGraph] = x0.get_example(system_idx)
+        single_system_batch_pos = single_system_batch.pos
+        # target_pos = target[i][cln025_alpha_carbon_idx]
+        # loss = loss + kabsch_rmsd(single_system_batch.pos, target_pos)
         
+        # NOTE: compute loss between CA idstances
+        generated_ca_pair_distances = torch.cdist(single_system_batch_pos, single_system_batch_pos, p=2)
+        n = generated_ca_pair_distances.shape[0]
+        i, j = torch.triu_indices(n, n, offset=1)
+        generated_ca_seq_distances = generated_ca_pair_distances[i, j]
+        
+        # dummy_traj.xyz = target[system_idx].cpu().detach().numpy()
+        # target_ca_pair_distances, _ = md.compute_contacts(
+        #     dummy_traj, scheme="ca", contacts=ca_resid_pair, periodic=False
+        # )
+        # target_ca_seq_distances = torch.from_numpy(target_ca_pair_distances).to(device)
+        target_ca_seq_distances = target[system_idx]
+        loss = loss + (generated_ca_seq_distances - target_ca_seq_distances).pow(2).sum()
+        ca_seq_distances = ca_seq_distances + generated_ca_seq_distances
+        tar_seq_distances_sum = tar_seq_distances_sum + target_ca_seq_distances
     
-    loss = loss / (num_systems_sampled)
+    loss = loss / num_systems_sampled
+    ca_seq_distances = ca_seq_distances / num_systems_sampled
     # loss_ca, loss_cn, loss_clash = unphysical_loss(x0_pos)
 
-    return loss
+    return loss, ca_seq_distances, tar_seq_distances_sum
 
 
 def _rollout(
@@ -460,6 +506,7 @@ def load_ours(mlcv_dim: int = 2):
         },
     }
     mlcv_model = MLCV(
+        mlcv_dim = mlcv_dim,
         encoder_layers = encoder_layers,
         options = options
     )
@@ -478,17 +525,22 @@ def load_vde():
     return model
 
 class CaDistanceDataset(Dataset):
-    def __init__(self, current_data_ca_distance, timelag_data_pos):
-        self.current_data_ca_distance = current_data_ca_distance
-        self.timelag_data_pos = timelag_data_pos
+    def __init__(
+        self,
+        current_data,
+        timelag_data,
+        device,
+    ):
+        self.current_data = current_data.to(device)
+        self.timelag_data = timelag_data.to(device)
 
     def __len__(self):
-        return len(self.current_data_ca_distance)
+        return len(self.current_data)
 
     def __getitem__(self, idx):
         return {
-            "ca_distance": self.current_data_ca_distance[idx],
-            "timelag_pos": self.timelag_data_pos[idx]
+            "current_data": self.current_data[idx],
+            "timelagged_data": self.timelag_data[idx]
         }
 
 def main():
@@ -497,7 +549,10 @@ def main():
     args = parser.parse_args()
     sequence = args.sequence
     method = args.method
-    args.date = date_str
+    if args.date is None:
+        args.date = datetime.now().strftime("%m%d_%H%M%S")
+    if args.date != "debug":
+        os.makedirs(f"model/{args.date}")
     mlcv_dim = args.mlcv_dim
     
     run = wandb.init(
@@ -512,7 +567,7 @@ def main():
     cfg_path = "./model/config.yaml"
     with open(cfg_path) as f:
         model_config = yaml.safe_load(f)
-    model_config["score_model"]["condition_mode"] = args.condition_type
+    model_config["score_model"]["condition_mode"] = args.condition_mode
     wandb.config.update(model_config)
     model_state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     score_model: DiGConditionalScoreModel = hydra.utils.instantiate(model_config["score_model"])
@@ -524,21 +579,15 @@ def main():
         score_model.eval()
     else:
         raise ValueError(f"Score model mode {args.score_model_mode} not supported")
-    wandb.watch(
-        score_model,
-        log="all",
-        log_freq=WANDB_WATCH_FREQ,
-    )
     
-    # NOTE: trail, add zero conv MLP to score model
+    # NOTE:, add zero conv MLP to score model
     # hidden_dim = 512
-    if args.condition_type == "backbone":
+    if args.condition_mode == "backbone":
         hidden_dim = 3
-    elif args.condition_type == "latent" or args.condition_type == "input":
+    elif args.condition_mode == "latent" or args.condition_mode == "input":
         hidden_dim = 512
     else:
-        raise ValueError(f"Condition type {args.condition_type} not supported")
-        
+        raise ValueError(f"Condition type {args.condition_mode} not supported")
     score_model.model_nn.add_module(f"zero_conv_mlp", nn.Sequential(
         nn.Linear(hidden_dim + mlcv_dim, hidden_dim),
         nn.ReLU(),
@@ -546,6 +595,17 @@ def main():
     ))
     for p in score_model.parameters():
         p.requires_grad = True
+    if args.param_watch:
+        # wandb.watch(
+        #     score_model,
+        #     log="all",
+        #     log_freq=WANDB_WATCH_FREQ,
+        # )
+        wandb.watch(
+            score_model.model_nn.get_submodule("zero_conv_mlp"),
+            log="all",
+            log_freq=WANDB_WATCH_FREQ,
+        )
     
     # Load MLCV model
     if method == "ours" or method == "debug":
@@ -557,14 +617,15 @@ def main():
     else:
         raise ValueError(f"Method {method} not supported")
     mlcv_model.train()
-    for p in mlcv_model.parameters():
-        p.requires_grad = True
+    # for p in mlcv_model.parameters():
+    #     p.requires_grad = True
     print(mlcv_model)
-    wandb.watch(
-        mlcv_model,
-        log="all",
-        log_freq=WANDB_WATCH_FREQ,
-    )
+    if args.param_watch:
+        wandb.watch(
+            mlcv_model,
+            log="all",
+            log_freq=WANDB_WATCH_FREQ,
+        )
     
     # Load config
     rollout_config = yaml.safe_load(rollout_config_path.read_text())
@@ -585,33 +646,30 @@ def main():
     
     # Load simulation data
     time_lag = args.time_lag
-    current_data_ca_distance, timelag_data_pos = load_data()
+    current_data, timelag_data = load_data()
     chemgraph = (
         get_context_chemgraph(sequence=sequence)
         .replace(system_id="CLN025")
         .to(device)
     )
-    
-    # Preprocess simulation data
-    data_num = current_data_ca_distance.shape[0]
-    train_idx = torch.from_numpy(np.random.choice(data_num - time_lag - 1, size=data_num // 100, replace=False))
-    current_data_ca_distance = current_data_ca_distance[train_idx]
-    current_data_ca_distance = current_data_ca_distance.to(device)
-    timelag_data_pos = timelag_data_pos[train_idx + time_lag]
-    timelag_data_pos = timelag_data_pos.to(device)
-    dataset = CaDistanceDataset(current_data_ca_distance, timelag_data_pos)
+    dataset = CaDistanceDataset(
+        current_data=current_data,
+        timelag_data=timelag_data,
+        device=device,
+    )
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     num_batches = len(dataloader)
 
     # Training loop
-    total_loss = 0
     pbar = tqdm(
         range(num_epochs),
-        desc=f"Loss: {total_loss:.6f}",
+        desc=f"Loss: x.xxxxxx",
         total=num_epochs,
     )
     for epoch in pbar:
         total_loss = 0
+        total_ca_seq_distances = 0
+        total_tar_seq_distances_sum = 0
         if epoch > args.last_training * num_epochs:
             score_model.train()
         else:
@@ -624,22 +682,24 @@ def main():
             leave=False,
         ):
             optimizer.zero_grad()
-            batch_data_ca_distance = batch["ca_distance"]
-            batch_data_ca_distance_timelag = batch["timelag_pos"]
-            mlcv = mlcv_model(batch_data_ca_distance)
+            current_data = batch["current_data"]
+            timelagged_data = batch["timelagged_data"]
+            mlcv = mlcv_model(current_data)
 
-            loss = calc_tlc_loss(
+            loss, ca_seq_distances, tar_seq_distances_sum = calc_tlc_loss(
                 score_model=score_model,
                 mlcv=mlcv,
-                target=batch_data_ca_distance_timelag,
+                target=timelagged_data,
                 sdes=sdes,
-                batch=[chemgraph] * batch_data_ca_distance.shape[0],
+                batch=[chemgraph] * current_data.shape[0],
                 n_replications=1,
                 mid_t=mid_t,
                 N_rollout=N_rollout,
-                condition_mode=args.condition_type,
+                condition_mode=args.condition_mode,
             )
             total_loss = total_loss + loss
+            total_ca_seq_distances = total_ca_seq_distances + ca_seq_distances
+            total_tar_seq_distances_sum = total_tar_seq_distances_sum + tar_seq_distances_sum
             loss.backward()
             optimizer.step()
             
@@ -650,6 +710,10 @@ def main():
         current_lr = optimizer.param_groups[0]['lr']
         wandb.log({
             "loss": total_loss/num_batches,
+            "ca_seq_distances": total_ca_seq_distances/num_batches,
+            "ca_seq_distances_mean": total_ca_seq_distances.mean()/num_batches,
+            "tar_seq_distances": total_tar_seq_distances_sum/num_batches,
+            "tar_seq_distances_mean": total_tar_seq_distances_sum.mean()/num_batches,
             "lr": current_lr,
             "epoch": epoch,
             "score_model_mode_status": score_model.training,
@@ -662,11 +726,13 @@ def main():
                 'mlcv_state_dict': mlcv_model.state_dict(),
                 'model_state_dict': score_model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-            }, f"model/{date_str}/checkpoint_{epoch+1}.pt")
-            
+            }, f"model/{args.date}/checkpoint_{epoch+1}.pt")
+        
+        print(f"MLCV: {mlcv}")
+        
     torch.save({
         'mlcv_state_dict': mlcv_model.state_dict(),
-    }, f"model/{date_str}/mlcv.pt")
+    }, f"model/{args.date}/mlcv.pt")
     
     run.finish()
     

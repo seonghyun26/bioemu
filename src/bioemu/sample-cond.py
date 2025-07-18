@@ -14,6 +14,8 @@ import torch
 import yaml
 from torch_geometric.data.batch import Batch
 from tqdm import tqdm
+from itertools import combinations
+
 import torch.nn as nn
 import mdtraj as md
 import pyemma
@@ -34,6 +36,7 @@ from bioemu.models import DiGConditionalScoreModel
 
 from mlcolvar.cvs import BaseCV, DeepTDA
 from mlcolvar.core import FeedForward, Normalization
+from mlcolvar.core.transform import Transform
 import lightning
 
 
@@ -46,11 +49,25 @@ SupportedDenoisersLiteral = Literal["dpm", "heun"]
 SUPPORTED_DENOISERS = list(typing.get_args(SupportedDenoisersLiteral))
 
 
+
+class DIM_NORMALIZATION(Transform):
+    def __init__(
+        self,
+        feature_dim = 1
+    ):
+        super().__init__(in_features=feature_dim, out_features=feature_dim)
+        self.register_buffer("feature_dim", torch.tensor(feature_dim))
+        
+    def forward(self, x):
+        x = torch.nn.functional.normalize(x, dim=-1)
+        return x
+    
 class MLCV(BaseCV, lightning.LightningModule):
     BLOCKS = ["norm_in", "encoder",]
 
     def __init__(
         self,
+        mlcv_dim: int,
         encoder_layers: list,
         options: dict = None,
         **kwargs,
@@ -68,6 +85,8 @@ class MLCV(BaseCV, lightning.LightningModule):
         # initialize encoder
         o = "encoder"
         self.encoder = FeedForward(encoder_layers, **options[o])
+        self.postprocessing = DIM_NORMALIZATION(mlcv_dim)
+        
 
 
 def load_ours(mlcv_dim: int = 1):
@@ -81,6 +100,7 @@ def load_ours(mlcv_dim: int = 1):
         },
     }
     mlcv_model = MLCV(
+        mlcv_dim = mlcv_dim,
         encoder_layers = encoder_layers,
         options = options
     )
@@ -104,7 +124,7 @@ def main(
     num_samples: int,
     output_dir: str | Path,
     batch_size_100: int = 10,
-    model_name: str | None = "bioemu-v1.0",
+    model_name: Literal["bioemu-v1.0", "bioemu-v1.1"] | None = "bioemu-v1.1",
     ckpt_path: str | Path | None = None,
     model_config_path: str | Path | None = None,
     denoiser_type: SupportedDenoisersLiteral | None = "dpm",
@@ -116,7 +136,7 @@ def main(
     method: str = "ours",
     date: str = "debug",
     mlcv_dim: int = 1,
-    condition_mode: str = "input",
+    condition_mode: str = "none",
 ) -> None:
     """
     Generate samples for a specified sequence, using a trained model.
@@ -167,21 +187,29 @@ def main(
     cond_ft_model = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/checkpoint_100.pt"
     cond_ft_model_state = torch.load(cond_ft_model, map_location="cpu", weights_only=True)
     score_model.load_state_dict(cond_ft_model_state["model_state_dict"])
-    
+    score_model.eval()
     
     # NOTE: Load MLCV model
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_CLN025-0-protein/CLN025.pdb"
+    cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_frame_selected.pdb"
+    # cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025.pdb"
     state_traj = md.load_pdb(cond_pdb)
-    ca_atoms = state_traj.topology.select("name CA")
-    n_atoms = len(ca_atoms)	
-    atom_pairs = []
-    for i in range(n_atoms):
-        for j in range(i+1, n_atoms):
-            atom_pairs.append([ca_atoms[i], ca_atoms[j]])
-    input_featurizer = pyemma.coordinates.featurizer(cond_pdb)
-    input_featurizer.add_distances(indices=atom_pairs)
-    mlcv_feature = input_featurizer.transform(state_traj)
+    # ca_atoms = state_traj.topology.select("name CA")
+    # n_atoms = len(ca_atoms)	
+    # atom_pairs = []
+    # for i in range(n_atoms):
+    #     for j in range(i+1, n_atoms):
+    #         atom_pairs.append([ca_atoms[i], ca_atoms[j]])
+    # input_featurizer = pyemma.coordinates.featurizer(cond_pdb)
+    # input_featurizer.add_distances(indices=atom_pairs)
+    # mlcv_feature = input_featurizer.transform(state_traj)
+    ca_resid_pair = np.array(
+        [(a.index, b.index) for a, b in combinations(list(state_traj.topology.residues), 2)]
+    )
+    mlcv_feature, _ = md.compute_contacts(
+        state_traj, scheme="ca", contacts=ca_resid_pair, periodic=False
+    )
+    print(mlcv_feature)
     
     if method == "ours":
         mlcv_model = load_ours(mlcv_dim).to(device)
@@ -193,6 +221,7 @@ def main(
     else:
         raise ValueError(f"Invalid method: {method}")
     cond_mlcv = mlcv_model(torch.from_numpy(mlcv_feature).to(device))
+    print(f"Conditioned MLCV: {cond_mlcv}")
 
 
     sdes = load_sdes(model_config_path=model_config_path, cache_so3_dir=cache_so3_dir)
@@ -340,10 +369,10 @@ def generate_batch(
     batch_size: int,
     seed: int,
     denoiser: Callable,
+    mlcv: torch.Tensor,
     cache_embeds_dir: str | Path | None,
     msa_file: str | Path | None = None,
     msa_host_url: str | None = None,
-    mlcv: torch.Tensor = None,
     condition_mode: str = "none",
     uncond_score_model: torch.nn.Module | None = None,
 ) -> dict[str, torch.Tensor]:

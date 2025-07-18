@@ -345,6 +345,12 @@ def _filter_unphysical_traj_masks(
         mdtraj.utils.in_units_of(rest_distances, "nanometers", "angstrom") > clash_distance,
         axis=1,
     )
+    
+    # Print stats
+    print(f"Number of frames: {len(traj)}")
+    print(f"Average CA-CA distance: {ca_seq_distances.mean()}")
+    print(f"Average C-N distance: {cn_seq_distances.mean()}")
+    print(f"Average clash distance: {rest_distances.mean()}")
     return frames_match_ca_seq_distance, frames_match_cn_seq_distance, frames_non_clash
 
 
@@ -370,7 +376,7 @@ def _get_physical_traj_indices(
     print(f"frames_non_clash: {frames_non_clash.sum()}")
     matches_all = frames_match_ca_seq_distance & frames_match_cn_seq_distance & frames_non_clash
     if strict:
-        assert matches_all.sum() <= 0, "Ended up with empty trajectory"
+        assert matches_all.sum() > 0, "Ended up with empty trajectory"
     return np.where(matches_all)[0]
 
 
@@ -456,7 +462,13 @@ def save_pdb_and_xtc(
     if filter_samples:
         num_samples_unfiltered = len(traj)
         logger.info("Filtering samples ...")
-        traj = filter_unphysical_traj(traj)
+        traj = filter_unphysical_traj(
+            traj=traj,
+            max_ca_seq_distance=6.0,
+            max_cn_seq_distance=3.0,
+            clash_distance=1.0,
+            strict=True,
+        )
         logger.info(
             f"Filtered {num_samples_unfiltered} samples down to {len(traj)} "
             "based on structure criteria. Filtering can be disabled with `--filter_samples=False`."

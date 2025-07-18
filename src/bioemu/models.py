@@ -488,12 +488,27 @@ class DistributionalGraphormerControl(nn.Module):
 
         # Change in translation and rotation. At this point, both quantities are invariant to global
         # SE(3) transformations.
-        (
-            T_eps,
-            IR_eps,
-        ) = self.st_module(  # st_module plays an equivalent role to BackboneUpdate in the Algorithm 20 of AF2 supplement.
-            (T_perturbed, IR_perturbed), x1d_conditioned, x2d, bias, mlcv=mlcv
-        )
+        if self.condition_mode == "backbone":
+            (
+                T_eps,
+                IR_eps,
+            ) = self.st_module(  # st_module plays an equivalent role to BackboneUpdate in the Algorithm 20 of AF2 supplement.
+                (T_perturbed, IR_perturbed), x1d, x2d, bias, mlcv=mlcv
+            )
+        elif self.condition_mode == "input":
+            (
+                T_eps,
+                IR_eps,
+            ) = self.st_module(  # st_module plays an equivalent role to BackboneUpdate in the Algorithm 20 of AF2 supplement.
+                (T_perturbed, IR_perturbed), x1d_conditioned, x2d, bias, mlcv=mlcv
+            )
+        else:
+            (
+                T_eps,
+                IR_eps,
+            ) = self.st_module(  # st_module plays an equivalent role to BackboneUpdate in the Algorithm 20 of AF2 supplement.
+                (T_perturbed, IR_perturbed), x1d, x2d, bias, mlcv=mlcv
+            )
 
         # Introduce orientation dependence of the translation score.
         T_eps = torch.matmul(IR_perturbed.transpose(-1, -2), T_eps.unsqueeze(-1)).squeeze(-1)

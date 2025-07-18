@@ -14,7 +14,7 @@ for i in "${!eta_max[@]}"; do
     CUDA_VISIBLE_DEVICES=$gpu python control.py \
         --sequence YYDPETGTWY \
         --score_model_mode eval \
-        --condition_type input \
+        --condition_mode input \
         --last_training 1 \
         --mlcv_dim 2 \
         --time_lag 5 \
