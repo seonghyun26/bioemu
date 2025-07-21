@@ -137,6 +137,7 @@ def main(
     date: str = "debug",
     mlcv_dim: int = 1,
     condition_mode: str = "none",
+    ckpt_idx: str = "100",
 ) -> None:
     """
     Generate samples for a specified sequence, using a trained model.
@@ -184,14 +185,14 @@ def main(
         nn.ReLU(),
         # nn.Linear(hidden_dim, hidden_dim),
     ))
-    cond_ft_model = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/checkpoint_100.pt"
+    cond_ft_model = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/checkpoint_{ckpt_idx}.pt"
     cond_ft_model_state = torch.load(cond_ft_model, map_location="cpu", weights_only=True)
     score_model.load_state_dict(cond_ft_model_state["model_state_dict"])
     score_model.eval()
     
     # NOTE: Load MLCV model
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_frame_selected.pdb"
+    cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres.pdb"
     # cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025.pdb"
     state_traj = md.load_pdb(cond_pdb)
     # ca_atoms = state_traj.topology.select("name CA")

@@ -9,6 +9,7 @@ import argparse
 import torch.nn as nn
 import mdtraj as md
 import math
+import matplotlib.pyplot as plt
 
 from datetime import datetime
 from pathlib import Path
@@ -68,7 +69,7 @@ def init_parser():
     parser.add_argument("--sequence", type=str, default="YYDPETGTWY")
     parser.add_argument("--method", type=str, default="ours")
     parser.add_argument("--learning_rate", type=float, default=1e-10)
-    parser.add_argument("--eta_max", type=float, default=1e-3)
+    parser.add_argument("--eta_max", type=float, default=1e-6)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--warmup_epochs", type=int, default=20)
     parser.add_argument("--batch_size", type=int, default=512)
@@ -211,8 +212,6 @@ class VariationalDynamicsEncoder(VariationalAutoEncoderCV):
         return elbo_loss + auto_correlation_loss
 
 
-
-
 class CosineAnnealingWarmUpRestarts(_LRScheduler):
     def __init__(self, optimizer, T_0, T_mult=1, eta_max=0.1, T_up=0, gamma=1., last_epoch=-1):
         if T_0 <= 0 or not isinstance(T_0, int):
@@ -269,14 +268,111 @@ class CosineAnnealingWarmUpRestarts(_LRScheduler):
             param_group['lr'] = lr
 
 
+def foldedness_by_hbond(
+    traj,
+    distance_cutoff=0.35,
+    bond_number_cutoff=3
+):
+	"""
+	Generate binary labels for folded/unfolded states based at least 3 bonds among eight bonds
+	- TYR1T-YR10OT1
+	- TYR1T-YR10OT2
+	- ASP3N-TYR8O
+	- THR6OG1-ASP3O
+	- THR6N-ASP3OD1
+	- THR6N-ASP3OD2
+	- TYR10N-TYR1O
+
+
+	Args:
+		traj (mdtraj): mdtraj trajectory object
+		distance_cutoff (float): donor-acceptor distance cutoff in nm (default 0.35 nm = 3.5 amstrong)
+		angle_cutoff (float): hydrogen bond angle cutoff in degrees (default 110 deg)
+		bond_number_cutoff (int): minimum number of bonds to be considered as folded (default 3)
+
+	Returns:
+		labels (np.array): binary array (1: folded, 0: unfolded)
+	"""
+	# TYR1N-YR10OT1
+	donor_idx = traj.topology.select('residue 1 and name N')[0] # Tyr1:N
+	acceptor_idx = traj.topology.select('residue 10 and name O')[0]   # Tyr10:OT1
+	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
+	label_O1 = ((distance[:,0] < distance_cutoff)).astype(int)
+	label_O2 = ((distance[:,0] < distance_cutoff)).astype(int) 
+	label_O3 = ((distance[:,0] < distance_cutoff)).astype(int)
+	label_TYR1N_TYR10OT1 = label_O1 | label_O2 | label_O3
+
+
+	# TYR1N-YR10OT2
+	donor_idx = traj.topology.select('residue 1 and name N')[0] # Tyr1:N
+	acceptor_idx = traj.topology.select('residue 10 and name OXT')[0]   # Tyr10:OT2
+	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
+	label_O1 = ((distance[:,0] < distance_cutoff)).astype(int)
+	label_O2 = ((distance[:,0] < distance_cutoff)).astype(int)
+	label_O3 = ((distance[:,0] < distance_cutoff)).astype(int)
+	label_TYR1N_TYR10OT2 = label_O1 | label_O2 | label_O3
+
+
+	# ASP3N-TYR8O
+	donor_idx = traj.topology.select('residue 3 and name N')[0]
+	acceptor_idx = traj.topology.select('residue 8 and name O')[0]
+	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
+	label_ASP3N_TYR8O = ((distance[:,0] < distance_cutoff)).astype(int)
+ 
+ 
+	# THR6OG1-ASP3O
+	donor_idx = traj.topology.select('residue 6 and name OG1')[0]
+	acceptor_idx = traj.topology.select('residue 3 and name O')[0]
+	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
+	label_THR6OG1_ASP3O = ((distance[:,0] < distance_cutoff)).astype(int)
+ 
+ 
+	# THR6N-ASP3OD1
+	donor_idx = traj.topology.select('residue 6 and name N')[0]
+	acceptor_idx = traj.topology.select('residue 3 and name OD1')[0]
+	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
+	label_THR6N_ASP3OD1 = ((distance[:,0] < distance_cutoff)).astype(int)
+ 
+	# THR6N-ASP3OD2
+	donor_idx = traj.topology.select('residue 6 and name N')[0]
+	acceptor_idx = traj.topology.select('residue 3 and name OD2')[0]
+	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
+	label_THR6N_ASP3OD2 = ((distance[:,0] < distance_cutoff)).astype(int)
+ 
+ 
+	# GLY7N-ASP3O
+	donor_idx = traj.topology.select('residue 7 and name N')[0]
+	acceptor_idx = traj.topology.select('residue 3 and name O')[0]
+	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
+	label_GLY7N_ASP3O = ((distance[:,0] < distance_cutoff)).astype(int)
+ 
+
+	# TYR10N-TYR1O
+	donor_idx = traj.topology.select('residue 10 and name N')[0] 
+	acceptor_idx = traj.topology.select('residue 1 and name O')[0] 
+	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
+	label_TYR10N_TYR1O = ((distance[:,0] < distance_cutoff)).astype(int)
+
+
+
+
+	# ASP3OD_THR6OG1_ASP3N_THR8O
+	bond_sum = label_TYR1N_TYR10OT1 + label_TYR1N_TYR10OT2 + label_ASP3N_TYR8O + label_THR6OG1_ASP3O \
+		+ label_THR6N_ASP3OD1 + label_THR6N_ASP3OD2 + label_GLY7N_ASP3O + label_TYR10N_TYR1O
+	labels = bond_sum >= bond_number_cutoff
+
+	return labels, bond_sum
+
+
 def load_data(
     simulation_idx=0,
     # time_lag=5,
 ):
     # cln025_cad_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_CLN025-{simulation_idx}-protein/CLN025-{simulation_idx}-CAdistance-mdtraj.pt"
     # cln025_pos_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_CLN025-{simulation_idx}-protein/CLN025-{simulation_idx}-CAdistance-mdtraj.pt"
-    current_data_path = "/home/shpark/prj-mlcv/lib/DESRES/dataset/CLN025-current-cad.pt"
-    timelag_data_path = "/home/shpark/prj-mlcv/lib/DESRES/dataset/CLN025-timelagged-cad.pt"
+    current_data_path = "/home/shpark/prj-mlcv/lib/DESRES/dataset/CLN025-5k-current-cad.pt"
+    timelag_data_path = "/home/shpark/prj-mlcv/lib/DESRES/dataset/CLN025-5k-timelagged-cad.pt"
+    # timelag_data_path = "/home/shpark/prj-mlcv/lib/DESRES/dataset/CLN025-5k-timelagged-label.pt"
     current_data = torch.load(current_data_path)
     timelag_data = torch.load(timelag_data_path)
     
@@ -374,6 +470,7 @@ def calc_tlc_loss(
     n_replications: int,
     mid_t: float,
     N_rollout: int,
+    loss_func = None,
     condition_mode: str = "none",
 ) -> torch.Tensor:
     device = batch[0].pos.device
@@ -393,41 +490,57 @@ def calc_tlc_loss(
     num_systems_sampled = len(batch)
 
     loss = torch.tensor(0.0, device=device)
-    ca_seq_distances  = torch.tensor(0.0, device=device)
-    tar_seq_distances_sum = torch.tensor(0.0, device=device)
+    generated_ca_distances_sum  = torch.tensor(0.0, device=device)
+    target_ca_distances_sum = torch.tensor(0.0, device=device)
     dummy_traj = md.load(
-        "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025.pdb"
+        "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres.pdb"
     )
     ca_resid_pair = np.array(
         [(a.index, b.index) for a, b in combinations(list(dummy_traj.topology.residues), 2)]
     )
+    
     for system_idx in range(num_systems_sampled):
         single_system_batch: list[ChemGraph] = x0.get_example(system_idx)
         single_system_batch_pos = single_system_batch.pos
         # target_pos = target[i][cln025_alpha_carbon_idx]
         # loss = loss + kabsch_rmsd(single_system_batch.pos, target_pos)
         
-        # NOTE: compute loss between CA idstances
+        # NOTE: compute loss between CA distances
         generated_ca_pair_distances = torch.cdist(single_system_batch_pos, single_system_batch_pos, p=2)
         n = generated_ca_pair_distances.shape[0]
         i, j = torch.triu_indices(n, n, offset=1)
-        generated_ca_seq_distances = generated_ca_pair_distances[i, j]
-        
-        # dummy_traj.xyz = target[system_idx].cpu().detach().numpy()
-        # target_ca_pair_distances, _ = md.compute_contacts(
-        #     dummy_traj, scheme="ca", contacts=ca_resid_pair, periodic=False
-        # )
-        # target_ca_seq_distances = torch.from_numpy(target_ca_pair_distances).to(device)
-        target_ca_seq_distances = target[system_idx]
+        generated_ca_distances = generated_ca_pair_distances[i, j]
+        target_ca_distances = target[system_idx]
+        seq_idx = torch.arange(n-1)
+        generated_ca_seq_distances = generated_ca_pair_distances[seq_idx, seq_idx+1]
+        cad_seq_idx = [0, 9, 17, 24, 30, 35, 39, 42, 44]
+        target_ca_seq_distances = target[system_idx][cad_seq_idx]
+
         loss = loss + (generated_ca_seq_distances - target_ca_seq_distances).pow(2).sum()
-        ca_seq_distances = ca_seq_distances + generated_ca_seq_distances
-        tar_seq_distances_sum = tar_seq_distances_sum + target_ca_seq_distances
+        # ca_seq_loss = loss_func(generated_ca_seq_distances, target_ca_seq_distances)
+        # ca_dist_loss = loss_func(generated_ca_distances, target_ca_distances)
+        # loss = loss + 10 * ca_seq_loss + ca_dist_loss
+        # generated_ca_distances_sum = generated_ca_distances_sum + generated_ca_distances
+        # target_ca_distances_sum = target_ca_distances_sum + target_ca_distances
     
     loss = loss / num_systems_sampled
-    ca_seq_distances = ca_seq_distances / num_systems_sampled
-    # loss_ca, loss_cn, loss_clash = unphysical_loss(x0_pos)
+    # generated_ca_distances_sum = generated_ca_distances_sum / num_systems_sampled
+    # target_ca_distances_sum = target_ca_distances_sum / num_systems_sampled
+    # ca_seq_distances = 0
+    # tar_seq_distances_sum = 0
+    # plt.hist(generated_ca_distances_sum.cpu().detach().numpy(), bins=10)
+    # plt.savefig("generated_ca_distances.png")
+    # plt.close()
+    # plt.hist(target_ca_distances_sum.cpu().detach().numpy(), bins=10)
+    # plt.savefig("target_ca_distances.png")
+    # plt.close()
+    # wandb.log({
+    #     "generated_ca_distances": wandb.Image("generated_ca_distances.png"),
+    #     "target_ca_distances": wandb.Image("target_ca_distances.png"),
+    # })
 
-    return loss, ca_seq_distances, tar_seq_distances_sum
+    return loss
+    # return loss, generated_ca_distances_sum, target_ca_distances_sum
 
 
 def _rollout(
@@ -661,6 +774,7 @@ def main():
     num_batches = len(dataloader)
 
     # Training loop
+    mse_loss = nn.MSELoss()
     pbar = tqdm(
         range(num_epochs),
         desc=f"Loss: x.xxxxxx",
@@ -686,7 +800,8 @@ def main():
             timelagged_data = batch["timelagged_data"]
             mlcv = mlcv_model(current_data)
 
-            loss, ca_seq_distances, tar_seq_distances_sum = calc_tlc_loss(
+            # loss, ca_seq_distances, tar_seq_distances_sum = calc_tlc_loss(
+            loss = calc_tlc_loss(
                 score_model=score_model,
                 mlcv=mlcv,
                 target=timelagged_data,
@@ -696,10 +811,11 @@ def main():
                 mid_t=mid_t,
                 N_rollout=N_rollout,
                 condition_mode=args.condition_mode,
+                loss_func=mse_loss,
             )
             total_loss = total_loss + loss
-            total_ca_seq_distances = total_ca_seq_distances + ca_seq_distances
-            total_tar_seq_distances_sum = total_tar_seq_distances_sum + tar_seq_distances_sum
+            # total_ca_seq_distances = total_ca_seq_distances + ca_seq_distances
+            # total_tar_seq_distances_sum = total_tar_seq_distances_sum + tar_seq_distances_sum
             loss.backward()
             optimizer.step()
             
@@ -710,14 +826,16 @@ def main():
         current_lr = optimizer.param_groups[0]['lr']
         wandb.log({
             "loss": total_loss/num_batches,
-            "ca_seq_distances": total_ca_seq_distances/num_batches,
-            "ca_seq_distances_mean": total_ca_seq_distances.mean()/num_batches,
-            "tar_seq_distances": total_tar_seq_distances_sum/num_batches,
-            "tar_seq_distances_mean": total_tar_seq_distances_sum.mean()/num_batches,
+            # "ca_seq_distances": total_ca_seq_distances/num_batches,
+            # "ca_seq_distances_mean": total_ca_seq_distances.mean()/num_batches,
+            # "tar_seq_distances": total_tar_seq_distances_sum/num_batches,
+            # "tar_seq_distances_mean": total_tar_seq_distances_sum.mean()/num_batches,
             "lr": current_lr,
             "epoch": epoch,
             "score_model_mode_status": score_model.training,
-        })
+            },
+            step=epoch,
+        )
         
         # Save checkpoint
         if (epoch + 1) % 10 == 0:
@@ -728,7 +846,7 @@ def main():
                 'optimizer_state_dict': optimizer.state_dict(),
             }, f"model/{args.date}/checkpoint_{epoch+1}.pt")
         
-        print(f"MLCV: {mlcv}")
+            # print(f"MLCV: {mlcv}")
         
     torch.save({
         'mlcv_state_dict': mlcv_model.state_dict(),

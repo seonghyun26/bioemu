@@ -14,8 +14,9 @@ CUDA_VISIBLE_DEVICES=$1 python control.py \
     --time_lag 100 \
     --date $date \
     --param_watch True \
-    --eta_max 1e-3 \
-    --tags pilot ca_distance_loss larger_time_lag
+    --eta_max 1e-4 \
+    --learning_rate 1e-8 \
+    --tags pilot ca_distance_loss larger_time_lag no_physical_val_loss
 
 
 # CUDA_VISIBLE_DEVICES=$1 python -m bioemu.sample-cond \
