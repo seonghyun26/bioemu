@@ -165,6 +165,8 @@ def main(
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)  # Fail fast if output_dir is non-writeable
 
+    if ckpt_idx is not None:
+        ckpt_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/checkpoint_{ckpt_idx}.pt"
     ckpt_path, model_config_path = maybe_download_checkpoint(
         model_name=model_name, ckpt_path=ckpt_path, model_config_path=model_config_path
     )
@@ -173,37 +175,27 @@ def main(
     model_config["score_model"]["condition_mode"] = condition_mode
     score_model: DiGConditionalScoreModel = hydra.utils.instantiate(model_config["score_model"])
     
-    # NOTE: Load fine-tuned score model
+    # NOTE: Load score model
     if condition_mode == "input" or condition_mode == "latent":
         hidden_dim = 512
     elif condition_mode == "backbone":
         hidden_dim = 3
+    elif condition_mode == "debug" or condition_mode == "none":
+        hidden_dim = 512
     else:
         raise ValueError(f"Invalid condition_mode: {condition_mode}")
     score_model.model_nn.add_module(f"zero_conv_mlp", nn.Sequential(
         nn.Linear(hidden_dim + mlcv_dim, hidden_dim),
         nn.ReLU(),
-        # nn.Linear(hidden_dim, hidden_dim),
     ))
-    cond_ft_model = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/checkpoint_{ckpt_idx}.pt"
-    cond_ft_model_state = torch.load(cond_ft_model, map_location="cpu", weights_only=True)
+    cond_ft_model_state = torch.load(ckpt_path, weights_only=True)
     score_model.load_state_dict(cond_ft_model_state["model_state_dict"])
     score_model.eval()
     
     # NOTE: Load MLCV model
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres.pdb"
-    # cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025.pdb"
     state_traj = md.load_pdb(cond_pdb)
-    # ca_atoms = state_traj.topology.select("name CA")
-    # n_atoms = len(ca_atoms)	
-    # atom_pairs = []
-    # for i in range(n_atoms):
-    #     for j in range(i+1, n_atoms):
-    #         atom_pairs.append([ca_atoms[i], ca_atoms[j]])
-    # input_featurizer = pyemma.coordinates.featurizer(cond_pdb)
-    # input_featurizer.add_distances(indices=atom_pairs)
-    # mlcv_feature = input_featurizer.transform(state_traj)
     ca_resid_pair = np.array(
         [(a.index, b.index) for a, b in combinations(list(state_traj.topology.residues), 2)]
     )
@@ -234,9 +226,8 @@ def main(
         logger.warning(f"msa_host_url is ignored because MSA file {msa_file} is provided.")
 
     # Parse FASTA or A3M file if sequence is a file path. Extract the actual sequence.
-    sequence = parse_sequence(sequence)
-
     # Check input sequence is valid
+    sequence = parse_sequence(sequence)
     check_protein_valid(sequence)
 
     fasta_path = output_dir / "sequence.fasta"
@@ -282,7 +273,6 @@ def main(
             )
         logger.info(f"Sampling {seed=}")
         
-        # NOTE: repeat CV as batch size        
         cond_mlcv_expanded = cond_mlcv.repeat(min(batch_size, n), 1)
         batch = generate_batch(
             score_model=score_model,
@@ -309,10 +299,12 @@ def main(
     node_orientations = torch.tensor(
         np.concatenate([np.load(f)["node_orientations"] for f in samples_files])
     )
+    backbone_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres_backbone.pdb"
     save_pdb_and_xtc(
         pos_nm=positions,
         node_orientations=node_orientations,
-        topology_path=output_dir / "topology.pdb",
+        # topology_path=output_dir / "topology.pdb",
+        topology_path=backbone_pdb,
         xtc_path=output_dir / "samples.xtc",
         sequence=sequence,
         filter_samples=filter_samples,
@@ -375,7 +367,6 @@ def generate_batch(
     msa_file: str | Path | None = None,
     msa_host_url: str | None = None,
     condition_mode: str = "none",
-    uncond_score_model: torch.nn.Module | None = None,
 ) -> dict[str, torch.Tensor]:
     """Generate one batch of samples, using GPU if available.
 
@@ -407,8 +398,7 @@ def generate_batch(
         batch=context_batch,
         score_model=score_model,
         mlcv=mlcv,
-        condition_mode=condition_mode,
-        uncond_score_model=uncond_score_model,
+        condition_mode=condition_mode
     )
     assert isinstance(sampled_chemgraph_batch, Batch)
     sampled_chemgraphs = sampled_chemgraph_batch.to_data_list()

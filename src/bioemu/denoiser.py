@@ -124,7 +124,11 @@ def get_score(
           This function converts the score model output to a score.
         t: Diffusion timestep. Shape [batch_size,]
     """
-    tmp = score_model(batch, t, mlcv=mlcv)
+    tmp = score_model(
+        batch,
+        t,
+        mlcv=mlcv,
+    )
     # Score is in axis angle representation [N,3] (vector is along axis of rotation, vector length
     # is rotation angle in radians).
     assert isinstance(sdes["node_orientations"], SO3SDE)
@@ -271,8 +275,6 @@ def dpm_solver(
     mlcv: torch.Tensor,
     record_grad_steps: set[int] = set(),
     condition_mode: str = "none",
-    uncond_score_model: torch.nn.Module = None,
-    cfg_lambda: float = 1.0,
 ) -> ChemGraph:
 
     """
@@ -288,8 +290,6 @@ def dpm_solver(
     if isinstance(score_model, torch.nn.Module):
         # permits unit-testing with dummy model
         score_model = score_model.to(device)
-    if uncond_score_model is not None:
-        uncond_score_model = uncond_score_model.to(device)
     pos_sde = sdes["pos"]
     assert isinstance(pos_sde, CosineVPSDE)
 
@@ -327,11 +327,11 @@ def dpm_solver(
                 mlcv=mlcv,
             )
             
-            # NOTE: CFG with uncond score and cond score
-            if uncond_score_model is not None:
-                uncond_score = get_score(batch=batch, t=t, score_model=uncond_score_model, sdes=sdes, mlcv=mlcv, )
-                score['node_orientations'] = (1 + cfg_lambda) * uncond_score['node_orientations'] - cfg_lambda * score['node_orientations']
-                score['pos'] = (1 + cfg_lambda) * uncond_score['pos'] - cfg_lambda * score['pos']
+            # # NOTE: CFG with uncond score and cond score
+            # if uncond_score_model is not None:
+            #     uncond_score = get_score(batch=batch, t=t, score_model=uncond_score_model, sdes=sdes, mlcv=mlcv, )
+            #     score['node_orientations'] = (1 + cfg_lambda) * uncond_score['node_orientations'] - cfg_lambda * score['node_orientations']
+            #     score['pos'] = (1 + cfg_lambda) * uncond_score['pos'] - cfg_lambda * score['pos']
 
         # t_{i-1} in the algorithm is the current t
         batch_idx = batch.batch
@@ -391,7 +391,13 @@ def dpm_solver(
         # Correction step
         # Evaluate score at updated pos and node orientations
         with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
-            score_u = get_score(batch=batch_u, t=t_lambda, sdes=sdes, score_model=score_model, mlcv=mlcv)
+            score_u = get_score(
+                batch=batch_u,
+                t=t_lambda,
+                sdes=sdes,
+                score_model=score_model,
+                mlcv=mlcv,
+            )
 
         pos_next = (
             alpha_t_next / alpha_t * batch.pos

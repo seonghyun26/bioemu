@@ -1,0 +1,24 @@
+score_model:
+  last_training: 1
+  mode: eval
+  ckpt_path: ./config/checkpoint.pt
+  cfg_path: ./config/score_config.yaml
+training:
+  seed: 0
+  num_epochs: 100
+  batch_size: 512
+  learning_rate: 1e-8
+  loss: cad_rmsd
+  scheduler:
+    name: CosineAnnealingWarmUpRestarts
+    T_mult: 1
+    eta_max: 1e-4
+    warmup_epochs: 20
+    gamma: 0.5
+sampling: 
+  rollout_path: ./config/rollout.yaml
+mlcv_model:
+  name: ours
+  mlcv_dim: 2
+  condition_mode: backbone
+  # loss: kabsch_rmsd

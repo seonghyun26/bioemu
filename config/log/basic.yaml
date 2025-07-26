@@ -1,0 +1,12 @@
+tags:
+- debug
+- ours
+score_model:
+  watch: False
+  log: all
+  watch_freq: 1
+mlcv_model:
+  watch: True
+  log: all
+  watch_freq: 1
+date: now

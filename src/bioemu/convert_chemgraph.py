@@ -464,9 +464,6 @@ def save_pdb_and_xtc(
         logger.info("Filtering samples ...")
         traj = filter_unphysical_traj(
             traj=traj,
-            max_ca_seq_distance=6.0,
-            max_cn_seq_distance=3.0,
-            clash_distance=1.0,
             strict=True,
         )
         logger.info(

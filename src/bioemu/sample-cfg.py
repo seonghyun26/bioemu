@@ -173,7 +173,7 @@ def main(
     
     # NOTE: Load MLCV model
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_CLN025-0-protein/CLN025.pdb"
+    cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_CLN025-0-protein/CLN025_desres.pdb"
     state_traj = md.load_pdb(cond_pdb)
     ca_atoms = state_traj.topology.select("name CA")
     n_atoms = len(ca_atoms)	
@@ -344,11 +344,11 @@ def generate_batch(
     batch_size: int,
     seed: int,
     denoiser: Callable,
+    mlcv: torch.Tensor,
+    uncond_score_model: torch.nn.Module,
     cache_embeds_dir: str | Path | None,
     msa_file: str | Path | None = None,
     msa_host_url: str | None = None,
-    mlcv: torch.Tensor = None,
-    uncond_score_model: torch.nn.Module = None,
     cfg_lambda: float = 1.0,
 ) -> dict[str, torch.Tensor]:
     """Generate one batch of samples, using GPU if available.

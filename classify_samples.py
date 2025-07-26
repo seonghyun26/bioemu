@@ -109,7 +109,7 @@ def main():
     args = init_parser()
     method = args.method
     date = args.date
-    res_dir = f"cln025-{method}-{date}"
+    res_dir = f"cln025/{date}"
     
     wandb.init(
       project="bioemu-sample",
