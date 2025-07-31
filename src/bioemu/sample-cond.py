@@ -34,12 +34,11 @@ from .utils import (
 )
 from bioemu.models import DiGConditionalScoreModel
 
-from mlcolvar.cvs import BaseCV, DeepTDA
-from mlcolvar.core import FeedForward, Normalization
+# from mlcolvar.cvs import BaseCV, DeepTDA
+# from mlcolvar.core import FeedForward, Normalization
 from mlcolvar.core.transform import Transform
-import lightning
 
-
+from model import *
 
 logger = logging.getLogger(__name__)
 HYDRA_FULL_ERROR=1
@@ -48,84 +47,6 @@ DEFAULT_DENOISER_CONFIG_DIR = Path(__file__).parent / "config/denoiser/"
 SupportedDenoisersLiteral = Literal["dpm", "heun"]
 SUPPORTED_DENOISERS = list(typing.get_args(SupportedDenoisersLiteral))
 
-
-
-class DIM_NORMALIZATION(Transform):
-    def __init__(
-        self,
-        feature_dim = 1,
-        normalization_factor: float = 1.0,
-    ):
-        super().__init__(in_features=feature_dim, out_features=feature_dim)
-        self.register_buffer("feature_dim", torch.tensor(feature_dim))
-        self.normalization_factor = normalization_factor
-        
-    def forward(self, x):
-        x = torch.nn.functional.normalize(x, dim=-1) * self.normalization_factor
-        return x
-    
-class MLCV(BaseCV, lightning.LightningModule):
-    BLOCKS = ["norm_in", "encoder",]
-
-    def __init__(
-        self,
-        mlcv_dim: int,
-        encoder_layers: list,
-        normalization_factor: float = 1.0,
-        options: dict = None,
-        **kwargs,
-    ):
-        super().__init__(in_features=encoder_layers[0], out_features=encoder_layers[-1], **kwargs)
-        # ======= OPTIONS =======
-        options = self.parse_options(options)
-        
-        # ======= BLOCKS =======
-        # initialize norm_in
-        o = "norm_in"
-        if (options[o] is not False) and (options[o] is not None):
-            self.norm_in = Normalization(self.in_features, **options[o])
-
-        # initialize encoder
-        o = "encoder"
-        self.encoder = FeedForward(encoder_layers, **options[o])
-        self.postprocessing = DIM_NORMALIZATION(
-            feature_dim=mlcv_dim,
-            normalization_factor=normalization_factor,
-        )
-        
-
-
-def load_ours(
-    mlcv_dim: int = 1,
-    normalization_factor: float = 1.0,
-):
-    encoder_layers = [45, 100, 100, mlcv_dim]
-    options = {
-        "encoder": {
-            "activation": "tanh",
-            "dropout": [0.1, 0.1, 0.1]
-        },
-        "norm_in": {
-        },
-    }
-    mlcv_model = MLCV(
-        mlcv_dim = mlcv_dim,
-        encoder_layers = encoder_layers,
-        normalization_factor = normalization_factor,
-        options = options
-    )
-    mlcv_model.eval()
-    return mlcv_model
-
-def load_tda():
-    model = torch.jit.load("/home/shpark/prj-mlcv/lib/bioemu/model/tda-jit.pt")
-    model.eval()
-    return model
-
-def load_vde():
-    model = torch.jit.load("/home/shpark/prj-mlcv/lib/bioemu/model/vde-jit.pt")
-    model.eval()
-    return model
 
 @print_traceback_on_exception
 @torch.no_grad()
@@ -215,6 +136,19 @@ def main(
     
     # NOTE: Load MLCV model
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if method == "ours":
+        mlcv_model = load_ours(
+            mlcv_dim=mlcv_dim,
+            dim_normalization=False,
+            normalization_factor=normalization_factor,
+        ).to(device)
+        mlcv_model.load_state_dict(cond_ft_model_state["mlcv_state_dict"])
+    elif method in ["tda", "tae", "vde"]:
+        mlcv_model = load_baseline(model_name=method).to(device)
+    else:
+        raise ValueError(f"Invalid method: {method}")
+    mlcv_model.eval()
+    
     cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres.pdb"
     state_traj = md.load_pdb(cond_pdb)
     ca_resid_pair = np.array(
@@ -223,18 +157,8 @@ def main(
     mlcv_feature, _ = md.compute_contacts(
         state_traj, scheme="ca", contacts=ca_resid_pair, periodic=False
     )
-    print(mlcv_feature)
-    
-    if method == "ours":
-        mlcv_model = load_ours(mlcv_dim, normalization_factor).to(device)
-        mlcv_model.load_state_dict(cond_ft_model_state["mlcv_state_dict"])
-    elif method == "tda":
-        mlcv_model = load_tda().to(device)
-    elif method == "vde":
-        mlcv_model = load_vde().to(device)
-    else:
-        raise ValueError(f"Invalid method: {method}")
     cond_mlcv = mlcv_model(torch.from_numpy(mlcv_feature).to(device))
+    print(f"MLCV feature: {mlcv_feature}")
     print(f"Conditioned MLCV: {cond_mlcv}")
 
 
