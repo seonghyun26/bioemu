@@ -53,13 +53,15 @@ SUPPORTED_DENOISERS = list(typing.get_args(SupportedDenoisersLiteral))
 class DIM_NORMALIZATION(Transform):
     def __init__(
         self,
-        feature_dim = 1
+        feature_dim = 1,
+        normalization_factor: float = 1.0,
     ):
         super().__init__(in_features=feature_dim, out_features=feature_dim)
         self.register_buffer("feature_dim", torch.tensor(feature_dim))
+        self.normalization_factor = normalization_factor
         
     def forward(self, x):
-        x = torch.nn.functional.normalize(x, dim=-1)
+        x = torch.nn.functional.normalize(x, dim=-1) * self.normalization_factor
         return x
     
 class MLCV(BaseCV, lightning.LightningModule):
@@ -69,6 +71,7 @@ class MLCV(BaseCV, lightning.LightningModule):
         self,
         mlcv_dim: int,
         encoder_layers: list,
+        normalization_factor: float = 1.0,
         options: dict = None,
         **kwargs,
     ):
@@ -85,12 +88,18 @@ class MLCV(BaseCV, lightning.LightningModule):
         # initialize encoder
         o = "encoder"
         self.encoder = FeedForward(encoder_layers, **options[o])
-        self.postprocessing = DIM_NORMALIZATION(mlcv_dim)
+        self.postprocessing = DIM_NORMALIZATION(
+            feature_dim=mlcv_dim,
+            normalization_factor=normalization_factor,
+        )
         
 
 
-def load_ours(mlcv_dim: int = 1):
-    encoder_layers = [45, 30, 30, mlcv_dim]
+def load_ours(
+    mlcv_dim: int = 1,
+    normalization_factor: float = 1.0,
+):
+    encoder_layers = [45, 100, 100, mlcv_dim]
     options = {
         "encoder": {
             "activation": "tanh",
@@ -102,6 +111,7 @@ def load_ours(mlcv_dim: int = 1):
     mlcv_model = MLCV(
         mlcv_dim = mlcv_dim,
         encoder_layers = encoder_layers,
+        normalization_factor = normalization_factor,
         options = options
     )
     mlcv_model.eval()
@@ -136,6 +146,7 @@ def main(
     method: str = "ours",
     date: str = "debug",
     mlcv_dim: int = 1,
+    normalization_factor: float = 1.0,
     condition_mode: str = "none",
     ckpt_idx: str = "100",
 ) -> None:
@@ -176,18 +187,28 @@ def main(
     score_model: DiGConditionalScoreModel = hydra.utils.instantiate(model_config["score_model"])
     
     # NOTE: Load score model
-    if condition_mode == "input" or condition_mode == "latent":
+    if condition_mode in ["input", "latent"]:
         hidden_dim = 512
-    elif condition_mode == "backbone":
+    elif condition_mode in ["backbone", "backbone-both"]:
         hidden_dim = 3
-    elif condition_mode == "debug" or condition_mode == "none":
+    elif condition_mode in ["debug", "none"]:
         hidden_dim = 512
     else:
         raise ValueError(f"Invalid condition_mode: {condition_mode}")
-    score_model.model_nn.add_module(f"zero_conv_mlp", nn.Sequential(
-        nn.Linear(hidden_dim + mlcv_dim, hidden_dim),
-        nn.ReLU(),
-    ))
+    if condition_mode in ["input", "latent", "backbone"]:
+        score_model.model_nn.add_module(f"zero_conv_mlp", nn.Sequential(
+            nn.Linear(hidden_dim + mlcv_dim, hidden_dim),
+            nn.ReLU(),
+        ))
+    elif condition_mode == "backbone-both":
+        score_model.model_nn.add_module(f"zero_conv_mlp_pos", nn.Sequential(
+            nn.Linear(hidden_dim + mlcv_dim, hidden_dim),
+            nn.ReLU(),
+        ))
+        score_model.model_nn.add_module(f"zero_conv_mlp_orient", nn.Sequential(
+            nn.Linear(2 + mlcv_dim, 3),  # 2 rotation features + mlcv_dim -> 3 axis-angle values
+            nn.ReLU(),
+        ))
     cond_ft_model_state = torch.load(ckpt_path, weights_only=True)
     score_model.load_state_dict(cond_ft_model_state["model_state_dict"])
     score_model.eval()
@@ -205,7 +226,7 @@ def main(
     print(mlcv_feature)
     
     if method == "ours":
-        mlcv_model = load_ours(mlcv_dim).to(device)
+        mlcv_model = load_ours(mlcv_dim, normalization_factor).to(device)
         mlcv_model.load_state_dict(cond_ft_model_state["mlcv_state_dict"])
     elif method == "tda":
         mlcv_model = load_tda().to(device)
@@ -217,7 +238,10 @@ def main(
     print(f"Conditioned MLCV: {cond_mlcv}")
 
 
-    sdes = load_sdes(model_config_path=model_config_path, cache_so3_dir=cache_so3_dir)
+    sdes = load_sdes(
+        model_config_path=model_config_path,
+        cache_so3_dir=cache_so3_dir
+    )
 
     # User may have provided an MSA file instead of a sequence. This will be used for embeddings.
     msa_file = sequence if str(sequence).endswith(".a3m") else None

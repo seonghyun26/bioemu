@@ -1,0 +1,4 @@
+defaults:
+- data: basic
+- log: basic
+- model: backbone

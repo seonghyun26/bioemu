@@ -6,6 +6,7 @@ import yaml
 import torch.nn as nn
 import mdtraj as md
 import math
+import numpy as np
 
 from datetime import datetime
 from pathlib import Path
@@ -281,13 +282,37 @@ def calc_tlc_loss(
     n_replications: int,
     mid_t: float,
     N_rollout: int,
+    record_grad_steps: set[int],
     cfg: OmegaConf = None,
     condition_mode: str = "none",
 ) -> torch.Tensor:
     device = batch[0].pos.device
     assert isinstance(batch, list)  # Not a Batch!
 
+    # Debug: Check MLCV at entry to calc_tlc_loss
+    if hasattr(cfg, 'log') and cfg.log.debug:
+        print(f"  [calc_tlc_loss] MLCV shape: {mlcv.shape if mlcv is not None else None}")
+        print(f"  [calc_tlc_loss] MLCV range: [{mlcv.min().item():.6f}, {mlcv.max().item():.6f}]" if mlcv is not None else "  [calc_tlc_loss] MLCV is None")
+        print(f"  [calc_tlc_loss] condition_mode: {condition_mode}")
+
     x_in = Batch.from_data_list(batch * n_replications)
+    
+    # CRITICAL FIX: Replicate MLCV to match batch replication
+    if mlcv is not None and n_replications > 1:
+        mlcv_replicated = mlcv.repeat(n_replications, 1)  # Repeat MLCV for each replication
+    else:
+        mlcv_replicated = mlcv
+    
+    # Debug: Check batch replication and MLCV alignment
+    if hasattr(cfg, 'log') and cfg.log.debug:
+        print(f"  [calc_tlc_loss] Original batch size: {len(batch)}, n_replications: {n_replications}")
+        print(f"  [calc_tlc_loss] x_in.num_graphs: {x_in.num_graphs}")
+        print(f"  [calc_tlc_loss] MLCV batch size: {mlcv.shape[0] if mlcv is not None else None}")
+        print(f"  [calc_tlc_loss] MLCV_replicated batch size: {mlcv_replicated.shape[0] if mlcv_replicated is not None else None}")
+        print(f"  [calc_tlc_loss] Total samples generated: {len(batch)} × {n_replications} = {x_in.num_graphs}")
+        if mlcv_replicated is not None and mlcv_replicated.shape[0] != x_in.num_graphs:
+            print(f"  ⚠️  WARNING: MLCV batch size mismatch! MLCV: {mlcv_replicated.shape[0]}, x_in: {x_in.num_graphs}")
+    
     x0 = _rollout(
         batch=x_in,
         sdes=sdes,
@@ -295,61 +320,58 @@ def calc_tlc_loss(
         mid_t=mid_t,
         N_rollout=N_rollout,
         device=device,
-        mlcv=mlcv,
+        mlcv=mlcv_replicated,  # Use replicated MLCV
         condition_mode=condition_mode,
+        record_grad_steps=record_grad_steps,
     )
     num_systems_sampled = len(batch)
-
-    loss = torch.tensor(0.0, device=device)
-    generated_ca_distances_sum = torch.tensor(0.0, device=device)
-    generated_ca_distances_distribution = torch.tensor(0.0, device=device)
-    # target_ca_distances_sum = torch.tensor(0.0, device=device)
     
-    for system_idx in range(num_systems_sampled):
-        single_system_batch: list[ChemGraph] = x0.get_example(system_idx)
-        single_system_batch_pos = single_system_batch.pos
-        # target_pos = target[i][cln025_alpha_carbon_idx]
-        # loss = loss + kabsch_rmsd(single_system_batch.pos, target_pos)
+    if cfg.data.representation == "cad":
+        # Fix: Use all replications, not just the first sample
+        generated_ca_distance = torch.empty(num_systems_sampled, n_replications, 45, device=device)
+        for idx in range(num_systems_sampled):
+            for rep in range(n_replications):
+                sample_idx = idx + rep * num_systems_sampled  # Get the correct sample index
+                generated_ca_pos = x0.get_example(sample_idx).pos
+                generated_ca_pair_distances = torch.cdist(generated_ca_pos, generated_ca_pos, p=2)
+                n = generated_ca_pair_distances.shape[0]
+                i, j = torch.triu_indices(n, n, offset=1)
+                generated_ca_distance[idx, rep] = generated_ca_pair_distances[i, j]
         
-        # NOTE: compute loss between CA distances
-        generated_ca_pair_distances = torch.cdist(single_system_batch_pos, single_system_batch_pos, p=2)
-        n = generated_ca_pair_distances.shape[0]
-        i, j = torch.triu_indices(n, n, offset=1)
-        generated_ca_distances = generated_ca_pair_distances[i, j]
-        loss = loss + (generated_ca_distances - target[system_idx]).pow(2).mean()
-        
-        # loss = loss + (generated_ca_seq_distances - target_ca_seq_distances).pow(2).mean()
-
-        # cad_seq_idx = [0, 9, 17, 24, 30, 35, 39, 42, 44]
-        seq_idx = torch.arange(n-1)
-        generated_ca_seq_distances = generated_ca_pair_distances[seq_idx, seq_idx+1]
-        generated_ca_distances_distribution = generated_ca_distances_distribution + generated_ca_seq_distances
-        generated_ca_distances_sum = generated_ca_distances_sum + generated_ca_seq_distances.mean()
-        
-        # target_ca_distances = target[system_idx]
-        # target_ca_distances_sum = target_ca_distances_sum + target_ca_distances
+        # Compute loss over all replications (mean over replications)
+        generated_ca_distance_mean = generated_ca_distance.mean(dim=1)  # Average over replications
+        loss = torch.nn.functional.mse_loss(generated_ca_distance_mean, target)
     
-    loss = loss / num_systems_sampled
-    generated_ca_distances_sum = generated_ca_distances_sum / num_systems_sampled
-    generated_ca_distances_distribution = generated_ca_distances_distribution / num_systems_sampled
-    # plt.hist(generated_ca_distances_sum.cpu().detach().numpy(), bins=10)
-    # plt.savefig("generated_ca_distances_sum.png")
-    # plt.close()
-    # wandb.log({
-    #     "generated_ca_distances_sum": wandb.Image("generated_ca_distances_sum.png"),
-    # })
+    elif cfg.data.representation == "cad-pos":
+        pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres_backbone.pdb")
+        ca_indices = pdb.topology.select('name CA')
+        
+        # Fix: Use all replications
+        loss = torch.tensor(0.0, device=device)
+        for idx in range(num_systems_sampled):
+            system_loss = torch.tensor(0.0, device=device)
+            target_ca_pos = target[idx, ca_indices]
+            for rep in range(n_replications):
+                sample_idx = idx + rep * num_systems_sampled
+                generated_ca_pos = x0.get_example(sample_idx).pos
+                target_ca_pos = target[idx, ca_indices]
+                system_loss = system_loss + kabsch_rmsd(generated_ca_pos, target_ca_pos)
+            loss = loss + (system_loss / n_replications)  # Average over replications
+        loss = loss / num_systems_sampled
     
-    # target_ca_distances_sum = target_ca_distances_sum / num_systems_sampled
-    # plt.hist(target_ca_distances_sum.cpu().detach().numpy(), bins=10)
-    # plt.savefig("target_ca_distances.png")
-    # plt.close()
-    # wandb.log({
-    #     "generated_ca_distances": wandb.Image("generated_ca_distances.png"),
-    #     "target_ca_distances": wandb.Image("target_ca_distances.png"),
-    # })
-
-    return loss, generated_ca_distances_sum, generated_ca_distances_distribution
-    # return loss, generated_ca_distances_sum, target_ca_distances_sum
+    else:
+        raise ValueError(f"Representation {cfg.data.representation} not supported")
+    
+    # seq_idx = torch.arange(n-1)
+    # generated_ca_seq_distances = generated_ca_pair_distances[seq_idx, seq_idx+1]
+    # generated_ca_distances_distribution = generated_ca_distances_distribution + generated_ca_seq_distances
+    # generated_ca_distances_sum = generated_ca_distances_sum + generated_ca_seq_distances.mean()
+        
+    # loss = loss / num_systems_sampled
+    # generated_ca_distances_sum = generated_ca_distances_sum / num_systems_sampled
+    # generated_ca_distances_distribution = generated_ca_distances_distribution / num_systems_sampled
+    
+    return loss
 
 
 def _rollout(
@@ -361,12 +383,18 @@ def _rollout(
     device: torch.device,
     mlcv: torch.Tensor,
     condition_mode: str = "none",
+    record_grad_steps: set[int] = set(),
 ):
     """Fast rollout to get a sampled structure in a small number of steps.
     Note that in the last step, only the positions are calculated, and not the orientations,
     because the orientations are not used to compute foldedness.
     """
     batch_size = batch.num_graphs
+    
+    # Debug: Check MLCV at entry to _rollout
+    if mlcv is not None and hasattr(score_model, 'training') and score_model.training:
+        print(f"    [_rollout] MLCV passed to dpm_solver: shape={mlcv.shape}, condition_mode={condition_mode}")
+        print(f"    [_rollout] MLCV values: {mlcv.flatten()[:5].detach().cpu().numpy()}")
     
     # Perform a few denoising steps to get a partially denoised sample `x_mid`.
     x_mid: ChemGraph = dpm_solver(
@@ -379,6 +407,7 @@ def _rollout(
         score_model=score_model,
         mlcv=mlcv,
         condition_mode=condition_mode,
+        record_grad_steps=record_grad_steps,  # Enable gradients for all steps
     )
 
     # Predict clean x (x0) from x_mid in a single jump.
@@ -473,30 +502,100 @@ def main(cfg):
         raise ValueError(f"Score model mode {cfg.model.score_model.mode} not supported")
     
     # NOTE: add zero conv MLP to score model
-    if cfg.model.mlcv_model.condition_mode == "backbone":
+    if cfg.model.mlcv_model.condition_mode in ["backbone", "backbone-both"]:
         hidden_dim = 3
-    elif cfg.model.mlcv_model.condition_mode in ["input", "latent"]:
+    elif cfg.model.mlcv_model.condition_mode in ["input", "latent", "input-control"]:
         hidden_dim = 512
     else:
         raise ValueError(f"Condition type {cfg.model.mlcv_model.condition_mode} not supported")
-    score_model.model_nn.add_module(f"zero_conv_mlp", nn.Sequential(
-        nn.Linear(hidden_dim + cfg.model.mlcv_model.mlcv_dim, hidden_dim),
-        nn.ReLU(),
-    ))
-    zero_conv_mlp = score_model.model_nn.get_submodule("zero_conv_mlp")
+    if cfg.model.mlcv_model.condition_mode in ["input", "latent", "backbone"]:
+        zero_linear = nn.Linear(hidden_dim + cfg.model.mlcv_model.mlcv_dim, hidden_dim)
+        # Fix: Use small random initialization instead of zero to avoid dead ReLU
+        nn.init.normal_(zero_linear.weight, mean=0.0, std=1e-4)  # Very small random weights
+        nn.init.zeros_(zero_linear.bias)  # Keep bias zero
+        # CRITICAL FIX: Add back nonlinearity! Linear layer alone can't learn complex mappings
+        zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+        score_model.model_nn.add_module(f"zero_conv_mlp", zero_mlp)
+        zero_conv_mlp = score_model.model_nn.get_submodule("zero_conv_mlp")
+        zero_conv_mlp.train()
+        
+        # Enable debug mode for the model
+        if cfg.log.debug:
+            score_model.model_nn._debug_conditioning = True
+            score_model.model_nn.st_module._debug_conditioning = True
+        
+        # Debug: Add hook to see if zero_conv_mlp is actually called
+        # if cfg.log.debug:
+        #     def debug_hook(module, input, output):
+        #         print(f"🔥 zero_conv_mlp called! Input shape: {input[0].shape}, Output shape: {output.shape}")
+        #         print(f"Input requires_grad: {input[0].requires_grad}, Output requires_grad: {output.requires_grad}")
+        #     zero_conv_mlp.register_forward_hook(debug_hook)
+    
+    elif cfg.model.mlcv_model.condition_mode == "input-control":
+        for i in range(8):
+            zero_linear = nn.Linear(hidden_dim + cfg.model.mlcv_model.mlcv_dim, hidden_dim)
+            # Fix: Use small random initialization instead of zero to avoid dead ReLU
+            nn.init.normal_(zero_linear.weight, mean=0.0, std=1e-4)  # Very small random weights
+            nn.init.zeros_(zero_linear.bias)  # Keep bias zero
+            zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+            zero_mlp.train()
+            score_model.model_nn.st_module.encoder.add_module(f"zero_conv_mlp_{i}", zero_mlp)
+    
+    elif cfg.model.mlcv_model.condition_mode == "backbone-both":
+        zero_linear_pos = nn.Linear(hidden_dim + cfg.model.mlcv_model.mlcv_dim, hidden_dim)
+        # Fix: Use small random initialization instead of zero to avoid dead ReLU
+        nn.init.normal_(zero_linear_pos.weight, mean=0.0, std=1e-4)  # Very small random weights
+        nn.init.zeros_(zero_linear_pos.bias)  # Keep bias zero
+        zero_mlp_pos = nn.Sequential(zero_linear_pos, nn.ReLU())
+        zero_mlp_pos.train()
+        score_model.model_nn.add_module(f"zero_conv_mlp_pos", zero_mlp_pos)
+        zero_conv_mlp_pos = score_model.model_nn.get_submodule("zero_conv_mlp_pos")
+        
+        zero_linear_orient = nn.Linear(2 + cfg.model.mlcv_model.mlcv_dim, 3)  # 2 rotation features + mlcv_dim -> 3 axis-angle values
+        # Fix: Use small random initialization instead of zero to avoid dead ReLU
+        nn.init.normal_(zero_linear_orient.weight, mean=0.0, std=1e-4)  # Very small random weights
+        nn.init.zeros_(zero_linear_orient.bias)  # Keep bias zero
+        zero_mlp_orient = nn.Sequential(zero_linear_orient, nn.ReLU())
+        zero_mlp_orient.train()
+        score_model.model_nn.add_module(f"zero_conv_mlp_orient", zero_mlp_orient)
+        zero_conv_mlp_orient = score_model.model_nn.get_submodule("zero_conv_mlp_orient")
+    
     for p in score_model.parameters():
         p.requires_grad = True
     if cfg.log.score_model.watch:
-        wandb.watch(
-            zero_conv_mlp,
-            log=cfg.log.score_model.log,
-            log_freq=cfg.log.score_model.watch_freq,
-        )
+        if cfg.model.mlcv_model.condition_mode == "backbone-both":
+            wandb.watch(
+                zero_conv_mlp_pos,
+                log=cfg.log.score_model.log,
+                log_freq=cfg.log.score_model.watch_freq,
+            )
+            wandb.watch(
+                zero_conv_mlp_orient,
+                log=cfg.log.score_model.log,
+                log_freq=cfg.log.score_model.watch_freq,
+            )
+        elif cfg.model.mlcv_model.condition_mode == "input-control":
+            for i in range(8):
+                wandb.watch(
+                    score_model.model_nn.st_module.encoder.get_submodule(f"zero_conv_mlp_{i}"),
+                    log=cfg.log.score_model.log,
+                    log_freq=cfg.log.score_model.watch_freq,
+                )
+        else:
+            wandb.watch(
+                zero_conv_mlp,
+                log=cfg.log.score_model.log,
+                log_freq=cfg.log.score_model.watch_freq,
+            )
     
     # NOTE: MLCV model
     method = cfg.model.mlcv_model.name
     if method == "ours":
-        mlcv_model = load_ours(mlcv_dim=cfg.model.mlcv_model.mlcv_dim).to(device)
+        mlcv_model = load_ours(
+            mlcv_dim=cfg.model.mlcv_model.mlcv_dim,
+            dim_normalization=cfg.model.mlcv_model.dim_normalization,
+            normalization_factor=cfg.model.mlcv_model.normalization_factor,
+        ).to(device)
     elif method == "tda":
         mlcv_model = load_tda().to(device)
     elif method == "vde":
@@ -514,26 +613,29 @@ def main(cfg):
         )
     
     # NOTE: Load training
-    repo_dir = Path("~/prj-mlcv/lib/bioemu").expanduser()
-    rollout_config_path = repo_dir / cfg.model.sampling.rollout_path
-    rollout_config = yaml.safe_load(rollout_config_path.read_text())
-    mid_t = rollout_config["mid_t"]
-    N_rollout = rollout_config["N_rollout"]
+    # repo_dir = Path("~/prj-mlcv/lib/bioemu").expanduser()
+    # rollout_config_path = repo_dir / cfg.model.sampling.rollout_path
+    # rollout_config = yaml.safe_load(rollout_config_path.read_text())
+    mid_t = cfg.model.rollout.mid_t
+    N_rollout = cfg.model.rollout.N_rollout
+    record_grad_steps = cfg.model.rollout.record_grad_steps
     learning_rate = cfg.model.training.learning_rate
     num_epochs = cfg.model.training.num_epochs
     batch_size = cfg.model.training.batch_size
-    if cfg.model.score_model.mode == "eval":
-        optimizer = torch.optim.AdamW(
-            list(mlcv_model.parameters()) + list(zero_conv_mlp.parameters()),
-            lr=learning_rate,
-        )
-    elif cfg.model.score_model.mode == "train":
-        optimizer = torch.optim.AdamW(
-            list(mlcv_model.parameters()) + list(score_model.parameters()),
-            lr=learning_rate,
-        )
+    watch_param_list = list(mlcv_model.parameters())
+    if cfg.model.score_model.mode == "train":
+        watch_param_list = watch_param_list + list(score_model.parameters())
+    if cfg.model.mlcv_model.condition_mode == "backbone-both":
+        watch_param_list = watch_param_list + list(zero_conv_mlp_pos.parameters()) + list(zero_conv_mlp_orient.parameters())
+    elif cfg.model.mlcv_model.condition_mode == "input-control":
+        for i in range(8):
+            watch_param_list = watch_param_list + list(score_model.model_nn.st_module.encoder.get_submodule(f"zero_conv_mlp_{i}").parameters())
     else:
-        raise ValueError(f"Score model mode {cfg.model.score_model.mode} not supported")
+        watch_param_list = watch_param_list + list(zero_conv_mlp.parameters())
+    optimizer = torch.optim.AdamW(
+        watch_param_list,
+        lr=learning_rate,
+    )
     scheduler_name = cfg.model.training.scheduler.name
     if scheduler_name == "CosineAnnealingWarmUpRestarts":
         scheduler = CosineAnnealingWarmUpRestarts(
@@ -577,26 +679,103 @@ def main(cfg):
     )
     for epoch in pbar:
         total_loss = 0
-        total_generated_ca_distances_sum = 0
-        total_generated_ca_distances_distribution = 0
 
         if epoch > cfg.model.score_model.last_training * num_epochs:
             score_model.train()
-        else:
-            score_model.eval()
+        
+        # Fix: Ensure conditioning modules are trainable even when score model is in eval mode
+        if cfg.model.mlcv_model.condition_mode == "backbone-both":
+            zero_conv_mlp_pos.train()
+            zero_conv_mlp_orient.train()
+        elif cfg.model.mlcv_model.condition_mode == "input-control":
+            for i in range(8):
+                score_model.model_nn.st_module.encoder.get_submodule(f"zero_conv_mlp_{i}").train()
+        elif cfg.model.mlcv_model.condition_mode in ["input", "latent", "backbone"]:
+            zero_conv_mlp.train()
 
-        for batch in tqdm(
+        for batch_idx, batch in enumerate(tqdm(
             dataloader,
             desc=f"Epoch {epoch}/{num_epochs}",
             total=len(dataloader),
             leave=False,
-        ):
+        )):
             optimizer.zero_grad()
             current_data = batch["current_data"]
             timelagged_data = batch["timelagged_data"]
             mlcv = mlcv_model(current_data)
+            
+            # Debug: Check if mlcv is None or has issues
+            # if cfg.log.debug:
+            #     print(f"MLCV shape: {mlcv.shape if mlcv is not None else 'None'}")
+            #     print(f"MLCV requires_grad: {mlcv.requires_grad if mlcv is not None else 'None'}")
+            #     print(f"MLCV values: {mlcv.flatten()[:5] if mlcv is not None else 'None'}")
 
-            loss, generated_ca_distances_sum, generated_ca_distances_distribution = calc_tlc_loss(
+            # Critical debug: Check if conditioning is actually changing the outputs
+            if cfg.log.debug and batch_idx == 0:  # Only debug first batch to avoid spam
+                print(f"=== CONDITIONING EFFECT DEBUG ===")
+                print(f"MLCV values: {mlcv.flatten()[:10].detach().cpu().numpy()}")
+                
+                # Test: Run the same input with and without MLCV to see if outputs differ
+                with torch.no_grad():
+                    loss_with_mlcv = calc_tlc_loss(
+                        score_model=score_model,
+                        mlcv=mlcv,
+                        target=timelagged_data,
+                        sdes=sdes,
+                        batch=[chemgraph] * current_data.shape[0],
+                        n_replications=1,
+                        mid_t=mid_t,
+                        N_rollout=N_rollout,
+                        record_grad_steps=record_grad_steps,
+                        condition_mode=cfg.model.mlcv_model.condition_mode,
+                        cfg=cfg,
+                    )
+                    
+                    # Create zero MLCV for comparison
+                    mlcv_zero = torch.zeros_like(mlcv)
+                    loss_without_mlcv = calc_tlc_loss(
+                        score_model=score_model,
+                        mlcv=mlcv_zero,
+                        target=timelagged_data,
+                        sdes=sdes,
+                        batch=[chemgraph] * current_data.shape[0],
+                        n_replications=1,
+                        mid_t=mid_t,
+                        N_rollout=N_rollout,
+                        record_grad_steps=record_grad_steps,
+                        condition_mode=cfg.model.mlcv_model.condition_mode,
+                        cfg=cfg,
+                    )
+                    
+                    # Also test with random MLCV
+                    mlcv_random = torch.randn_like(mlcv) * 0.1
+                    loss_with_random_mlcv = calc_tlc_loss(
+                        score_model=score_model,
+                        mlcv=mlcv_random,
+                        target=timelagged_data,
+                        sdes=sdes,
+                        batch=[chemgraph] * current_data.shape[0],
+                        n_replications=1,
+                        mid_t=mid_t,
+                        N_rollout=N_rollout,
+                        record_grad_steps=record_grad_steps,
+                        condition_mode=cfg.model.mlcv_model.condition_mode,
+                        cfg=cfg,
+                    )
+                    
+                print(f"Loss with real MLCV:   {loss_with_mlcv.item():.6f}")
+                print(f"Loss with zero MLCV:   {loss_without_mlcv.item():.6f}")
+                print(f"Loss with random MLCV: {loss_with_random_mlcv.item():.6f}")
+                print(f"Real vs Zero effect:   {abs(loss_with_mlcv.item() - loss_without_mlcv.item()):.6f}")
+                print(f"Real vs Random effect: {abs(loss_with_mlcv.item() - loss_with_random_mlcv.item()):.6f}")
+                
+                if abs(loss_with_mlcv.item() - loss_without_mlcv.item()) < 1e-6:
+                    print("❌ CRITICAL: Conditioning has NO effect on loss!")
+                else:
+                    print("✅ Conditioning affects loss (good!)")
+                print(f"=== END DEBUG ===")
+
+            loss = calc_tlc_loss(
                 score_model=score_model,
                 mlcv=mlcv,
                 target=timelagged_data,
@@ -605,20 +784,83 @@ def main(cfg):
                 n_replications=1,
                 mid_t=mid_t,
                 N_rollout=N_rollout,
+                record_grad_steps=record_grad_steps,
                 condition_mode=cfg.model.mlcv_model.condition_mode,
+                cfg=cfg,
             )
             total_loss = total_loss + loss
-            total_generated_ca_distances_sum = total_generated_ca_distances_sum + generated_ca_distances_sum
-            total_generated_ca_distances_distribution = total_generated_ca_distances_distribution + generated_ca_distances_distribution
-            
             loss.backward()
+            
+            # Debug: Check gradient norms before clipping
+            if cfg.log.debug and batch_idx == 0:
+                total_norm_before = 0
+                param_count = 0
+                max_grad = 0
+                min_grad = float('inf')
+                for p in watch_param_list:
+                    if p.grad is not None:
+                        param_norm = p.grad.data.norm(2)
+                        total_norm_before += param_norm.item() ** 2
+                        max_grad = max(max_grad, p.grad.abs().max().item())
+                        min_grad = min(min_grad, p.grad.abs().min().item())
+                        param_count += 1
+                total_norm_before = total_norm_before ** (1. / 2)
+                print(f"Gradient norm BEFORE clipping: {total_norm_before:.2e} (max: {max_grad:.2e}, min: {min_grad:.2e})")
+            
+            # Add gradient clipping to prevent vanishing/exploding gradients
+            if hasattr(cfg.model.training, 'gradient_clip_val') and cfg.model.training.gradient_clip_val > 0:
+                clip_val = cfg.model.training.gradient_clip_val
+            else:
+                clip_val = 1.0  # Default clip value
+            
+            # Clip gradients for all parameters being optimized
+            clipped_norm = torch.nn.utils.clip_grad_norm_(watch_param_list, max_norm=clip_val)
+            
+            # Debug: Check gradient clipping results
+            if cfg.log.debug and batch_idx == 0:
+                print(f"Gradient clip results: total_norm={clipped_norm:.2e}, clip_val={clip_val}")
+                if clipped_norm > clip_val:
+                    print(f"⚠️  Gradients were clipped! (norm {clipped_norm:.2e} > {clip_val})")
+                else:
+                    print(f"✓ Gradients within bounds (no clipping needed)")
+            
+            # Optional gradient flow debugging (add debug flag to config to enable)
+            if cfg.log.debug:
+                zero_conv_modules = []
+                if cfg.model.mlcv_model.condition_mode == "backbone-both":
+                    zero_conv_modules.extend([zero_conv_mlp_pos, zero_conv_mlp_orient])
+                elif cfg.model.mlcv_model.condition_mode == "input-control":
+                    for i in range(8):
+                        zero_conv_modules.append(score_model.model_nn.st_module.encoder.get_submodule(f"zero_conv_mlp_{i}"))
+                elif cfg.model.mlcv_model.condition_mode in ["input", "latent", "backbone"]:
+                    zero_conv_modules.append(zero_conv_mlp)
+                
+                for i, module in enumerate(zero_conv_modules):
+                    # Check gradients more carefully
+                    grad_info = []
+                    for name, param in module.named_parameters():
+                        if param.grad is not None:
+                            grad_norm = param.grad.norm().item()
+                            grad_max = param.grad.abs().max().item()
+                            grad_info.append(f"{name}: norm={grad_norm:.2e}, max={grad_max:.2e}")
+                        else:
+                            grad_info.append(f"{name}: grad=None")
+                    
+                    print(f"Zero conv module {i} detailed gradients: {grad_info}")
+                    has_meaningful_grad = any(p.grad is not None and p.grad.abs().sum() > 1e-8 for p in module.parameters())
+                    if not has_meaningful_grad:
+                        print(f"WARNING: Zero conv module {i} has no meaningful gradients!")
+                    else:
+                        print(f"✓ Zero conv module {i} has gradients!")
+                
+            
             optimizer.step()
         
         scheduler.step()
         pbar.set_description(f"Loss: {total_loss/num_batches:.6f}")
         wandb.log({
             "loss": total_loss/num_batches,
-            "generated_ca_distances_sum": total_generated_ca_distances_sum/num_batches,
+            # "generated_ca_distances_sum": total_generated_ca_distances_sum/num_batches,
             "lr": optimizer.param_groups[0]['lr'],
             "epoch": epoch,
             },
@@ -626,7 +868,7 @@ def main(cfg):
         )
         
         # Save checkpoint
-        if (epoch + 1) % 20 == 0:
+        if (epoch + 1) % cfg.log.ckpt_freq == 0:
             torch.save({
                 'epoch': epoch,
                 'mlcv_state_dict': mlcv_model.state_dict(),

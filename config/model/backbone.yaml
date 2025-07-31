@@ -5,20 +5,22 @@ score_model:
   cfg_path: ./config/score_config.yaml
 training:
   seed: 0
-  num_epochs: 100
-  batch_size: 1
+  num_epochs: 200
+  batch_size: 256
   learning_rate: 1e-8
+  loss: cad_rmsd
   scheduler:
     name: CosineAnnealingWarmUpRestarts
     T_mult: 1
-    eta_max: 1e-4
+    eta_max: 1e-5
     warmup_epochs: 20
     gamma: 0.5
 rollout:
   mid_t: 0.786
-  N_rollout: 5
-  record_grad_steps: [2, 3]
+  N_rollout: 7
+  record_grad_steps: [3, 4, 5]
 mlcv_model:
   name: ours
   mlcv_dim: 2
   condition_mode: backbone
+  dim_normalization: False

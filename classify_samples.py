@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 def init_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--method", type=str, default="ours")
+    parser.add_argument("--sample_path", type=str, default="./res/cln025")
     parser.add_argument("--date", type=str, required=True)
     return parser.parse_args()
 
@@ -107,24 +107,23 @@ def foldedness_by_hbond(
 
 def main():
     args = init_parser()
-    method = args.method
+    res_dir = args.sample_path
     date = args.date
-    res_dir = f"cln025/{date}"
     
     wandb.init(
       project="bioemu-sample",
       entity="eddy26",
       config=args,
-      name=f"{method}-{date}"
+      name=f"{date}"
       )
 
-    xtc_path = f"/home/shpark/prj-mlcv/lib/bioemu/res/{res_dir}/samples_sidechain_rec.xtc"
-    pdb_path = f"/home/shpark/prj-mlcv/lib/bioemu/res/{res_dir}/samples_sidechain_rec.pdb"
+    xtc_path = f"/home/shpark/prj-mlcv/lib/bioemu/{res_dir}/samples_sidechain_rec.xtc"
+    pdb_path = f"/home/shpark/prj-mlcv/lib/bioemu/{res_dir}/samples_sidechain_rec.pdb"
     all_samples_traj = md.load(xtc_path, top=pdb_path)
     print(all_samples_traj)
 
-    samples_xtc_path = f"/home/shpark/prj-mlcv/lib/bioemu/res/{res_dir}/samples_md_equil.xtc"
-    samples_pdb_path = f"/home/shpark/prj-mlcv/lib/bioemu/res/{res_dir}/samples_md_equil.pdb"
+    samples_xtc_path = f"/home/shpark/prj-mlcv/lib/bioemu/{res_dir}/samples_md_equil.xtc"
+    samples_pdb_path = f"/home/shpark/prj-mlcv/lib/bioemu/{res_dir}/samples_md_equil.pdb"
     traj = md.load(samples_xtc_path, top=samples_pdb_path)
     print(traj)
     

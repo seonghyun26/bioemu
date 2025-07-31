@@ -302,8 +302,85 @@ def dpm_solver(
     batch = cast(ChemGraph, batch)  # help out mypy/linter
 
     # NOTE: MLCV condition on final representation
-    if condition_mode == "backbone" and mlcv is not None:
-        num_graphs = batch.num_graphs
+    num_graphs = batch.num_graphs
+    if condition_mode == "backbone-both" and mlcv is not None:
+        mlcv_expanded = mlcv.repeat_interleave(int(batch.batch.shape[0] / num_graphs), dim=0)
+        batch.pos = batch.pos + score_model.model_nn.get_submodule("zero_conv_mlp_pos")(torch.cat([batch.pos, mlcv_expanded], dim=1))
+        
+        # PROPER ROTATION CONDITIONING: Use Lie algebra (so(3)) approach
+        # Generate conditioning in the tangent space (axis-angle representation)
+        
+        # Extract rotation-invariant features for conditioning
+        # Use trace and Frobenius norm as rotation-invariant descriptors
+        batch_orient_trace = torch.diagonal(batch.node_orientations, dim1=-2, dim2=-1).sum(dim=-1, keepdim=True)  # [N, 1]
+        batch_orient_frob = torch.norm(batch.node_orientations.view(batch.node_orientations.shape[0], -1), dim=-1, keepdim=True)  # [N, 1]
+        rotation_features = torch.cat([batch_orient_trace, batch_orient_frob], dim=-1)  # [N, 2]
+        
+        axis_angle_conditioning = score_model.model_nn.get_submodule("zero_conv_mlp_orient")(torch.cat([rotation_features, mlcv_expanded], dim=1))  # Shape: [N, 3]
+        
+        # Convert axis-angle to skew-symmetric matrix
+        def axis_angle_to_skew_matrix(axis_angle):
+            """Convert axis-angle vector to skew-symmetric matrix"""
+            x, y, z = axis_angle[..., 0], axis_angle[..., 1], axis_angle[..., 2]
+            zeros = torch.zeros_like(x)
+            skew = torch.stack([
+                torch.stack([zeros, -z, y], dim=-1),
+                torch.stack([z, zeros, -x], dim=-1),
+                torch.stack([-y, x, zeros], dim=-1)
+            ], dim=-2)
+            return skew
+        
+        # Convert axis-angle conditioning to rotation matrix via matrix exponential
+        def axis_angle_to_rotation_matrix(axis_angle, eps=1e-6):
+            """Convert axis-angle to rotation matrix using Rodrigues' formula"""
+            angle = torch.norm(axis_angle, dim=-1, keepdim=True)
+            
+            # Handle small angles for numerical stability
+            small_angle_mask = (angle < eps).squeeze(-1)
+            angle = torch.where(angle < eps, eps, angle)
+            
+            axis = axis_angle / angle
+            skew = axis_angle_to_skew_matrix(axis)
+            
+            # Rodrigues' formula: R = I + sin(θ)K + (1-cos(θ))K²
+            cos_angle = torch.cos(angle).unsqueeze(-1)
+            sin_angle = torch.sin(angle).unsqueeze(-1)
+            
+            I = torch.eye(3, device=axis_angle.device, dtype=axis_angle.dtype).expand_as(skew)
+            R = I + sin_angle * skew + (1 - cos_angle) * torch.bmm(skew, skew)
+            
+            # For very small angles, approximate as identity + skew
+            R_small = I + axis_angle_to_skew_matrix(axis_angle)
+            R = torch.where(small_angle_mask.unsqueeze(-1).unsqueeze(-1), R_small, R)
+            
+            return R
+        
+        # Apply conditioning by composition: R_new = R_conditioning @ R_original
+        R_conditioning = axis_angle_to_rotation_matrix(axis_angle_conditioning)
+        
+        # Debug: Check rotation conditioning
+        if hasattr(score_model, '_debug_conditioning') and score_model._debug_conditioning:
+            print(f"        [Rotation Conditioning] axis_angle range: [{axis_angle_conditioning.min().item():.6f}, {axis_angle_conditioning.max().item():.6f}]")
+            print(f"        [Rotation Conditioning] R_conditioning det: {torch.det(R_conditioning).mean().item():.6f} (should be ~1.0)")
+            print(f"        [Rotation Conditioning] R_conditioning orthogonal error: {torch.norm(torch.bmm(R_conditioning.transpose(-1,-2), R_conditioning) - torch.eye(3, device=R_conditioning.device)).item():.6f}")
+        
+        batch.node_orientations = torch.bmm(R_conditioning, batch.node_orientations)
+        
+        # ALTERNATIVE SIMPLER APPROACH (comment out above and uncomment below):
+        # from .so3_sde import rotvec_to_rotmat
+        # R_conditioning = rotvec_to_rotmat(axis_angle_conditioning)
+        # batch.node_orientations = torch.bmm(R_conditioning, batch.node_orientations)
+        
+        # ALTERNATIVE QUATERNION APPROACH (most numerically stable):
+        # # Convert MLP output to quaternion (4D)
+        # zero_linear_orient = nn.Linear(2 + cfg.model.mlcv_model.mlcv_dim, 4)  # -> quaternion
+        # quat_conditioning = torch.tanh(axis_angle_conditioning)  # Bound the output
+        # quat_conditioning = quat_conditioning / torch.norm(quat_conditioning, dim=-1, keepdim=True)  # Normalize
+        # from .openfold.utils.rigid_utils import quat_to_rot
+        # R_conditioning = quat_to_rot(quat_conditioning)
+        # batch.node_orientations = torch.bmm(R_conditioning, batch.node_orientations)
+        
+    elif condition_mode == "backbone" and mlcv is not None:
         mlcv_expanded = mlcv.repeat_interleave(int(batch.batch.shape[0] / num_graphs), dim=0)
         batch.pos = batch.pos + score_model.model_nn.get_submodule("zero_conv_mlp")(torch.cat([batch.pos, mlcv_expanded], dim=1))
     
@@ -327,12 +404,6 @@ def dpm_solver(
                 mlcv=mlcv,
             )
             
-            # # NOTE: CFG with uncond score and cond score
-            # if uncond_score_model is not None:
-            #     uncond_score = get_score(batch=batch, t=t, score_model=uncond_score_model, sdes=sdes, mlcv=mlcv, )
-            #     score['node_orientations'] = (1 + cfg_lambda) * uncond_score['node_orientations'] - cfg_lambda * score['node_orientations']
-            #     score['pos'] = (1 + cfg_lambda) * uncond_score['pos'] - cfg_lambda * score['pos']
-
         # t_{i-1} in the algorithm is the current t
         batch_idx = batch.batch
         alpha_t, sigma_t = pos_sde.mean_coeff_and_std(x=batch.pos, t=t, batch_idx=batch_idx)

@@ -26,17 +26,6 @@ from .utils import (
     format_npz_samples_filename,
     print_traceback_on_exception,
 )
-# from chemgraph import ChemGraph
-# from convert_chemgraph import save_pdb_and_xtc
-# from get_embeds import get_colabfold_embeds
-# from models import DiGConditionalScoreModel, DiGConditionalScoreModelControl
-# from sde_lib import SDE
-# from seq_io import check_protein_valid, parse_sequence, write_fasta
-# from utils import (
-#     count_samples_in_output_dir,
-#     format_npz_samples_filename,
-#     print_traceback_on_exception,
-# )
 
 logger = logging.getLogger(__name__)
 HYDRA_FULL_ERROR=1
@@ -266,6 +255,7 @@ def generate_batch(
         device=device,
         batch=context_batch,
         score_model=score_model,
+        mlcv=None
     )
     assert isinstance(sampled_chemgraph_batch, Batch)
     sampled_chemgraphs = sampled_chemgraph_batch.to_data_list()

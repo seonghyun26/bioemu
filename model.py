@@ -11,13 +11,15 @@ from mlcolvar.core.transform import Transform
 class DIM_NORMALIZATION(Transform):
     def __init__(
         self,
-        feature_dim = 1
+        feature_dim = 1,
+        normalization_factor = 10,
     ):
         super().__init__(in_features=feature_dim, out_features=feature_dim)
         self.register_buffer("feature_dim", torch.tensor(feature_dim))
+        self.normalization_factor = normalization_factor
         
     def forward(self, x):
-        x = torch.nn.functional.normalize(x, dim=-1)
+        x = torch.nn.functional.normalize(x, dim=-1) * self.normalization_factor
         return x
     
 
@@ -27,7 +29,9 @@ class MLCV(BaseCV, lightning.LightningModule):
     def __init__(
         self,
         mlcv_dim: int,
+        dim_normalization: bool,
         encoder_layers: list,
+        normalization_factor: float = 1.0,
         options: dict = None,
         **kwargs,
     ):
@@ -44,7 +48,11 @@ class MLCV(BaseCV, lightning.LightningModule):
         # initialize encoder
         o = "encoder"
         self.encoder = FeedForward(encoder_layers, **options[o])
-        self.postprocessing = DIM_NORMALIZATION(mlcv_dim)
+        if dim_normalization:
+            self.postprocessing = DIM_NORMALIZATION(
+                feature_dim=mlcv_dim,
+                normalization_factor=normalization_factor,
+            )
 
 
 class VDELoss(torch.nn.Module):
@@ -136,9 +144,11 @@ class VariationalDynamicsEncoder(VariationalAutoEncoderCV):
 
 def load_ours(
     mlcv_dim: int = 2,
+    dim_normalization: bool = False,
+    normalization_factor: float = 1.0,
     **kwargs,
 ):
-    encoder_layers = [45, 30, 30, mlcv_dim]
+    encoder_layers = [45, 100, 100, mlcv_dim]
     options = {
         "encoder": {
             "activation": "tanh",
@@ -149,8 +159,10 @@ def load_ours(
     }
     mlcv_model = MLCV(
         mlcv_dim = mlcv_dim,
+        dim_normalization = dim_normalization,
+        normalization_factor = normalization_factor,
+        options = options,
         encoder_layers = encoder_layers,
-        options = options
     )
     mlcv_model.train()
     print(mlcv_model)

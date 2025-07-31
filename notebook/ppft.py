@@ -16,9 +16,9 @@ from pathlib import Path
 OUTPUT_DIR = Path("~/ppft_example_output").expanduser()
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 repo_dir = Path("~/prj-mlcv/lib/bioemu").expanduser()
-rollout_config_path = repo_dir / "notebooks" / "rollout.yaml"
+rollout_config_path = repo_dir / "notebook" / "rollout.yaml"
 # Reference structure downloaded from https://zenodo.org/records/7992926
-reference_pdb = repo_dir / "notebooks" / "CLN025_desres.pdb"
+reference_pdb = repo_dir / "notebook" / "CLN025_desres.pdb"
 assert reference_pdb.exists(), f"Reference structure not found at {reference_pdb}"
 
 reference_traj = mdtraj.load(reference_pdb)

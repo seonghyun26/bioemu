@@ -2,11 +2,13 @@ tags:
 - debug
 - ours
 score_model:
-  watch: False
+  watch: True
   log: all
-  watch_freq: 1
+  watch_freq: 11
 mlcv_model:
   watch: True
   log: all
   watch_freq: 1
 date: now
+ckpt_freq: 20
+debug: False

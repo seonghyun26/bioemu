@@ -3,8 +3,11 @@ cd ../
 date=$(date +%m%d_%H%M%S)
 
 CUDA_VISIBLE_DEVICES=$1 python control.py \
-    --config-name basic \
-    ++log.date=$date
+    --config-name input \
+    ++log.date=$date \
+    ++log.tags=['pilot'] \
+    ++data.representation=cad \
+    ++model.mlcv_model.mlcv_dim=2 
     # --sequence YYDPETGTWY \
     # --score_model_mode eval \
     # --condition_mode backbone \

@@ -484,11 +484,29 @@ class DistributionalGraphormerControl(nn.Module):
         if self.condition_mode == "input" and mlcv is not None:
             mlcv_expanded = mlcv.reshape(x1d.shape[0], 1, -1).expand(-1, x1d.shape[1], -1)
             x1d_with_condition = torch.cat([x1d, mlcv_expanded], dim=2)
+            
+            # Debug: Check conditioning inputs and outputs
+            if hasattr(self, '_debug_conditioning') and self._debug_conditioning:
+                print(f"        [DistGraphormer] x1d shape: {x1d.shape}, mlcv_expanded shape: {mlcv_expanded.shape}")
+                print(f"        [DistGraphormer] x1d_with_condition shape: {x1d_with_condition.shape}")
+            
             x1d_conditioned = self.get_submodule("zero_conv_mlp")(x1d_with_condition)
+            
+            # Debug: Check if conditioning actually changes the representation
+            if hasattr(self, '_debug_conditioning') and self._debug_conditioning:
+                x1d_diff = (x1d_conditioned - x1d).abs()
+                mlcv_nonzero = (mlcv.abs() > 1e-6).sum().item()
+                print(f"        [DistGraphormer] x1d change due to conditioning: mean={x1d_diff.mean().item():.2e}, max={x1d_diff.max().item():.2e}")
+                print(f"        [DistGraphormer] MLCV non-zero elements: {mlcv_nonzero}/{mlcv.numel()}")
+                print(f"        [DistGraphormer] MLCV range: [{mlcv.min().item():.3f}, {mlcv.max().item():.3f}]")
+        else:
+            x1d_conditioned = x1d  # Fallback when mlcv is None
+            if hasattr(self, '_debug_conditioning') and self._debug_conditioning:
+                print(f"        [DistGraphormer] No conditioning applied (condition_mode={self.condition_mode}, mlcv={'None' if mlcv is None else 'exists'})")
 
         # Change in translation and rotation. At this point, both quantities are invariant to global
         # SE(3) transformations.
-        if self.condition_mode == "backbone":
+        if self.condition_mode in ["backbone", "backbone-both"]:
             (
                 T_eps,
                 IR_eps,
@@ -500,7 +518,7 @@ class DistributionalGraphormerControl(nn.Module):
                 T_eps,
                 IR_eps,
             ) = self.st_module(  # st_module plays an equivalent role to BackboneUpdate in the Algorithm 20 of AF2 supplement.
-                (T_perturbed, IR_perturbed), x1d_conditioned, x2d, bias, mlcv=mlcv
+                (T_perturbed, IR_perturbed), x1d_conditioned, x2d, bias, mlcv=None  # Don't pass mlcv since conditioning already applied to x1d_conditioned
             )
         else:
             (
@@ -577,6 +595,11 @@ class DiGConditionalScoreModel(torch.nn.Module):
         # 0 and 1, where the filter used in the embedding is less expressive. To avoid
         # this, t is scaled by the timesteps before passing to model.
         assert hasattr(x, "batch"), "batch of ChemGraphs must have a 'batch' attribute."
+        
+        # Debug: Check MLCV at DiG score model entry
+        if mlcv is not None and self.training:
+            print(f"      [DiGScoreModel] MLCV received: shape={mlcv.shape}, range=[{mlcv.min().item():.6f}, {mlcv.max().item():.6f}]")
+        
         time_effective = t[x.batch] * 1000
         # NOTE: DiG takes in inverse rotations as input. To be consistent
         # with frame conventions and sampling in the rest of the code, frames are transposed

@@ -19,11 +19,17 @@ class TimelagDataset(Dataset):
         self._load_data()
         
     def _load_data(self):
-        self.current_cad_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/current-cad.pt"
-        self.current_pos_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/current-pos.pt"
-        self.timelag_cad_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/lag{self.time_lag}-cad.pt"
-        self.current_pos_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/current-pos.pt"
-        self.timelag_pos_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/lag{self.time_lag}-pos.pt"
+        if self.time_lag ==0:
+            self.current_cad_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/current-cad.pt"
+            self.current_pos_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/current-pos.pt"
+            self.timelag_cad_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/current-cad.pt"
+            self.timelag_pos_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/current-pos.pt"
+        else:
+            self.current_cad_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/current-cad.pt"
+            self.current_pos_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/current-pos.pt"
+            self.timelag_cad_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/lag{self.time_lag}-cad.pt"
+            self.timelag_pos_path = f"{self.data_dir}/{self.system_id}-{self.dataset_size}/lag{self.time_lag}-pos.pt"
+        
         self.current_cad = torch.load(self.current_cad_path, map_location=self.device)
         self.current_pos = torch.load(self.current_pos_path, map_location=self.device)
         self.timelag_cad = torch.load(self.timelag_cad_path, map_location=self.device)
@@ -34,6 +40,10 @@ class TimelagDataset(Dataset):
             return len(self.current_cad)
         elif self.representation == "pos":
             return len(self.current_pos)
+        elif self.representation == "cad-pos":
+            return len(self.current_cad)
+        else:
+            raise ValueError(f"Invalid representation: {self.representation}")
 
     def __getitem__(self, idx):
         if self.representation == "cad":
@@ -46,4 +56,10 @@ class TimelagDataset(Dataset):
                 "current_data": self.current_pos[idx],
                 "timelagged_data": self.timelag_pos[idx]
             }
-        
+        elif self.representation == "cad-pos":
+            return {
+                "current_data": self.current_cad[idx],
+                "timelagged_data": self.timelag_pos[idx],
+            }
+        else:
+            raise ValueError(f"Invalid representation: {self.representation}")

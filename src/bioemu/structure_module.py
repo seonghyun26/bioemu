@@ -272,9 +272,8 @@ class SAEncoderControl(nn.Module):
 
     def __init__(self, n_layer: int, **kwargs):
         super().__init__()
+        self.condition_mode = kwargs.pop("condition_mode")
         self.layers = nn.ModuleList([SAEncoderLayer(**kwargs) for _ in range(n_layer)])
-        self.mlcv = None
-        self.mlcv2score = None
 
     def forward(
         self,
@@ -290,20 +289,13 @@ class SAEncoderControl(nn.Module):
         # C: channel size
         # mlcv: [B, mlcv_dim]
         
-        # if mlcv is not None:
-        #     x1d_cond = x1d + mlcv
-        #     x1d = self.zero_conv(x1d)
-        
         for i, module in enumerate(self.layers):
-            # NOTE: Original
-            res = module(x1d, x2d, pose, bias)
-            x1d = res
-            
-            # NOTE: Control
-            # res = module(x1d, x2d, pose, bias)
-            # control_x1d = self._modules[f"control_encoder_{i}"](control_x1d, x2d, pose, bias)
-            # control_x1d = self._modules[f"zero_conv_{i}"](control_x1d)
-            # x1d = res + control_x1d
+            if self.condition_mode == "input-control" and mlcv is not None:
+                x1d_condition = torch.cat([x1d, mlcv.unsqueeze(1).repeat(1, 10, 1)], dim=-1)
+                x1d_conditioned = self.get_submodule(f"zero_conv_mlp_{i}")(x1d_condition)
+                x1d = module(x1d_conditioned, x2d, pose, bias)
+            else:
+                x1d = module(x1d, x2d, pose, bias)
         return x1d
 
 
@@ -331,7 +323,7 @@ class StructureModuleControl(nn.Module):
     def __init__(self, d_model: int, **kwargs):
         super().__init__()
         self.condition_mode = kwargs.pop("condition_mode")
-        self.encoder = SAEncoderControl(d_model=d_model, **kwargs)
+        self.encoder = SAEncoderControl(d_model=d_model, condition_mode=self.condition_mode, **kwargs)
         self.diff_head = DiffHead(ninp=d_model)
 
     def forward(
@@ -342,6 +334,12 @@ class StructureModuleControl(nn.Module):
         bias: torch.Tensor,
         mlcv: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Debug: Check what x1d we receive in st_module
+        if hasattr(self, '_debug_conditioning') and self._debug_conditioning:
+            print(f"          [StructureModule] Received x1d shape: {x1d.shape}")
+            print(f"          [StructureModule] condition_mode: {self.condition_mode}")
+            print(f"          [StructureModule] mlcv: {'None' if mlcv is None else f'shape={mlcv.shape}'}")
+        
         x1d = self.encoder(x1d, x2d, pose, bias, mlcv)
         
         # NOTE: MLCV condition on final representation, [B, 1, 1] -> [B, L, C]

@@ -6,8 +6,10 @@ score_model:
 training:
   seed: 0
   num_epochs: 100
-  batch_size: 1
+  batch_size: 256
   learning_rate: 1e-8
+  loss: cad_rmsd
+  gradient_clip_val: 1.0  # Add gradient clipping (adjust as needed)
   scheduler:
     name: CosineAnnealingWarmUpRestarts
     T_mult: 1
@@ -16,9 +18,12 @@ training:
     gamma: 0.5
 rollout:
   mid_t: 0.786
-  N_rollout: 5
-  record_grad_steps: [2, 3]
+  N_rollout: 7
+  n_replications: 2
+  record_grad_steps: [3, 4, 5]
 mlcv_model:
   name: ours
   mlcv_dim: 2
-  condition_mode: backbone
+  condition_mode: input
+  dim_normalization: True
+  normalization_factor: 1

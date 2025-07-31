@@ -89,6 +89,7 @@ def _rollout(
         device=device,
         record_grad_steps=record_grad_steps,
         score_model=score_model,
+        mlcv=None
     )
 
     # Predict clean x (x0) from x_mid in a single jump.
