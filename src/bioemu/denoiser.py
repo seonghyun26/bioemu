@@ -384,6 +384,23 @@ def dpm_solver(
         mlcv_expanded = mlcv.repeat_interleave(int(batch.batch.shape[0] / num_graphs), dim=0)
         batch.pos = batch.pos + score_model.model_nn.get_submodule("zero_conv_mlp")(torch.cat([batch.pos, mlcv_expanded], dim=1))
     
+    elif condition_mode == "input" and mlcv is not None:
+        # For input mode, conditioning is applied inside the score model during get_score() calls
+        # No need to modify the batch here, just ensure MLCV is passed to get_score()
+        # Debug: Verify input conditioning will work
+        if hasattr(score_model, 'model_nn') and hasattr(score_model.model_nn, 'zero_conv_mlp'):
+            print(f"        [dpm_solver] Input conditioning: MLCV will be applied via score model")
+            print(f"        [dpm_solver] MLCV shape: {mlcv.shape}, range: [{mlcv.min().item():.3f}, {mlcv.max().item():.3f}]")
+        else:
+            print(f"        [dpm_solver] WARNING: Input conditioning requested but zero_conv_mlp not found!")
+    
+    elif condition_mode in ["latent", "input-control"] and mlcv is not None:
+        # These modes should also work through the score model, not direct batch modification
+        print(f"        [dpm_solver] {condition_mode} conditioning: MLCV will be applied via score model")
+    
+    elif condition_mode != "none" and mlcv is not None:
+        print(f"        [dpm_solver] WARNING: Unknown condition_mode '{condition_mode}' - no conditioning applied!")
+    
     so3_sde = sdes["node_orientations"]
     assert isinstance(so3_sde, SO3SDE)
     so3_sde.to(device)
@@ -396,6 +413,11 @@ def dpm_solver(
 
         # Evaluate score
         with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
+            # Debug: Check MLCV before score computation
+            if i == 0 and condition_mode != "none" and mlcv is not None:
+                print(f"        [dpm_solver] Step {i}: Passing MLCV to get_score")
+                print(f"        [dmp_solver] MLCV shape: {mlcv.shape}, values: {mlcv.flatten()[:3]}")
+            
             score = get_score(
                 batch=batch,
                 t=t,
@@ -462,6 +484,10 @@ def dpm_solver(
         # Correction step
         # Evaluate score at updated pos and node orientations
         with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
+            # Debug: Check MLCV in correction step  
+            if i == 0 and condition_mode != "none" and mlcv is not None:
+                print(f"        [dpm_solver] Correction step {i}: Passing MLCV to get_score")
+            
             score_u = get_score(
                 batch=batch_u,
                 t=t_lambda,
@@ -502,3 +528,88 @@ def dpm_solver(
         batch = batch_next.replace(node_orientations=sample)
 
     return batch
+
+
+def training_rollout_denoiser(
+    *,
+    sdes: dict[str, SDE],
+    batch: Batch,
+    score_model: torch.nn.Module,
+    device: torch.device,
+    eps_t: float = 0.001,  # Final target (unused, for compatibility) 
+    mid_t: float = 0.786,  # Stop point for dpm_solver (matches training)
+    max_t: float = 0.99,
+    N: int = 7,           # Match training N_rollout
+    mlcv: torch.Tensor = None,
+    condition_mode: str = "none",
+) -> ChemGraph:
+    """
+    Denoiser that exactly replicates the training rollout process:
+    1. dpm_solver from max_t to mid_t (partial denoising)
+    2. Direct jump from mid_t to clean x0 using score prediction
+    
+    This matches the training process in bioemu/src/bioemu/training/loss.py:_rollout
+    """
+    print(f"        [training_rollout_denoiser] Using training-matched rollout process")
+    print(f"        [training_rollout_denoiser] Step 1: dmp_solver {max_t} → {mid_t} ({N} steps)")
+    
+    batch_size = batch.num_graphs
+
+    # Step 1: Perform partial denoising (same as training)
+    x_mid: ChemGraph = dpm_solver(
+        sdes=sdes,
+        batch=batch,
+        eps_t=mid_t,        # Stop at mid_t (0.786)
+        max_t=max_t,        # Start from max_t (0.99)
+        N=N,                # Use training N_rollout (7)
+        device=device,
+        score_model=score_model,
+        mlcv=mlcv,          # Pass MLCV for conditioning
+        condition_mode=condition_mode,
+        record_grad_steps=set(),  # No gradients during sampling
+    )
+
+    print(f"        [training_rollout_denoiser] Step 2: Direct jump {mid_t} → clean x0")
+    
+    # Step 2: Direct jump to clean x0 (same as training)
+    mid_t_expanded = torch.full((batch_size,), mid_t, device=device)
+    score_mid_t = get_score(
+        batch=x_mid, 
+        sdes=sdes, 
+        t=mid_t_expanded, 
+        score_model=score_model,
+        mlcv=mlcv,  # Pass MLCV for conditioning
+    )["pos"]
+
+    # Compute clean positions using the same formula as training
+    x0_pos = _get_x0_given_xt_and_score_sampling(
+        sde=sdes["pos"],
+        x=x_mid.pos,
+        t=torch.full((batch_size,), mid_t, device=device),
+        batch_idx=x_mid.batch,
+        score=score_mid_t,
+    )
+
+    print(f"        [training_rollout_denoiser] Rollout complete: generated clean structures")
+    
+    # Return clean sample (for orientations, use the mid_t result)
+    return x_mid.replace(pos=x0_pos)
+
+
+def _get_x0_given_xt_and_score_sampling(
+    sde: SDE,
+    x: torch.Tensor,
+    t: torch.Tensor,
+    batch_idx: torch.LongTensor,
+    score: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Compute x_0 given x_t and score.
+    Copied from bioemu/src/bioemu/training/loss.py for sampling compatibility.
+    """
+    from .so3_sde import SO3SDE  # Import here to avoid circular imports
+    assert not isinstance(sde, SO3SDE)
+
+    alpha_t, sigma_t = sde.mean_coeff_and_std(x=x, t=t, batch_idx=batch_idx)
+
+    return (x + sigma_t**2 * score) / alpha_t

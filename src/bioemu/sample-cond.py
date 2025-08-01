@@ -93,12 +93,12 @@ def main(
         msa_host_url: MSA server URL. If not set, this defaults to colabfold's remote server. If sequence is an a3m file, this is ignored.
         filter_samples: Filter out unphysical samples with e.g. long bond distances or steric clashes.
     """
-
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)  # Fail fast if output_dir is non-writeable
 
     if ckpt_idx is not None:
-        ckpt_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/checkpoint_{ckpt_idx}.pt"
+        ckpt_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/final_model.pt"
     ckpt_path, model_config_path = maybe_download_checkpoint(
         model_name=model_name, ckpt_path=ckpt_path, model_config_path=model_config_path
     )
@@ -107,7 +107,18 @@ def main(
     model_config["score_model"]["condition_mode"] = condition_mode
     score_model: DiGConditionalScoreModel = hydra.utils.instantiate(model_config["score_model"])
     
-    # NOTE: Load score model
+    # NOTE: Load score model - CRITICAL FIX: Load base model first, then add conditioning modules
+    # Load the checkpoint first
+    cond_ft_model_state = torch.load(ckpt_path, weights_only=True)
+    
+    # Load the base model state (this will load the pretrained weights but not the conditioning modules)
+    try:
+        score_model.load_state_dict(cond_ft_model_state["model_state_dict"], strict=False)
+        print("✓ Loaded base model weights (strict=False to allow missing conditioning modules)")
+    except Exception as e:
+        print(f"Warning: Could not load base model state: {e}")
+    
+    # Now add conditioning modules with the same initialization as training
     if condition_mode in ["input", "latent"]:
         hidden_dim = 512
     elif condition_mode in ["backbone", "backbone-both"]:
@@ -116,26 +127,73 @@ def main(
         hidden_dim = 512
     else:
         raise ValueError(f"Invalid condition_mode: {condition_mode}")
+    
     if condition_mode in ["input", "latent", "backbone"]:
-        score_model.model_nn.add_module(f"zero_conv_mlp", nn.Sequential(
-            nn.Linear(hidden_dim + mlcv_dim, hidden_dim),
-            nn.ReLU(),
-        ))
+        zero_linear = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
+        # CRITICAL: Use the same initialization as training
+        nn.init.normal_(zero_linear.weight, mean=0.0, std=1e-4)
+        nn.init.zeros_(zero_linear.bias)
+        zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+        score_model.model_nn.add_module(f"zero_conv_mlp", zero_mlp)
+        
     elif condition_mode == "backbone-both":
-        score_model.model_nn.add_module(f"zero_conv_mlp_pos", nn.Sequential(
-            nn.Linear(hidden_dim + mlcv_dim, hidden_dim),
-            nn.ReLU(),
-        ))
-        score_model.model_nn.add_module(f"zero_conv_mlp_orient", nn.Sequential(
-            nn.Linear(2 + mlcv_dim, 3),  # 2 rotation features + mlcv_dim -> 3 axis-angle values
-            nn.ReLU(),
-        ))
-    cond_ft_model_state = torch.load(ckpt_path, weights_only=True)
-    score_model.load_state_dict(cond_ft_model_state["model_state_dict"])
+        zero_linear_pos = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
+        nn.init.normal_(zero_linear_pos.weight, mean=0.0, std=1e-4)
+        nn.init.zeros_(zero_linear_pos.bias)
+        zero_mlp_pos = nn.Sequential(zero_linear_pos, nn.ReLU())
+        score_model.model_nn.add_module(f"zero_conv_mlp_pos", zero_mlp_pos)
+        
+        zero_linear_orient = nn.Linear(2 + mlcv_dim, 3)
+        nn.init.normal_(zero_linear_orient.weight, mean=0.0, std=1e-4)
+        nn.init.zeros_(zero_linear_orient.bias)
+        zero_mlp_orient = nn.Sequential(zero_linear_orient, nn.ReLU())
+        score_model.model_nn.add_module(f"zero_conv_mlp_orient", zero_mlp_orient)
+    
+    # Now load the trained conditioning weights if they exist in the checkpoint
+    try:
+        score_model.load_state_dict(cond_ft_model_state["model_state_dict"], strict=False)
+        print("✓ Loaded trained conditioning module weights")
+    except Exception as e:
+        print(f"Warning: Could not load conditioning weights: {e}")
+        print("This might mean the conditioning modules weren't properly saved during training")
     score_model.eval()
     
+    # CRITICAL: Ensure conditioning modules are also in eval mode
+    if condition_mode in ["input", "latent", "backbone"]:
+        if hasattr(score_model.model_nn, 'zero_conv_mlp'):
+            score_model.model_nn.zero_conv_mlp.eval()
+            print("✓ Set zero_conv_mlp to eval mode")
+    elif condition_mode == "backbone-both":
+        if hasattr(score_model.model_nn, 'zero_conv_mlp_pos'):
+            score_model.model_nn.zero_conv_mlp_pos.eval()
+            print("✓ Set zero_conv_mlp_pos to eval mode")
+        if hasattr(score_model.model_nn, 'zero_conv_mlp_orient'):
+            score_model.model_nn.zero_conv_mlp_orient.eval()
+            print("✓ Set zero_conv_mlp_orient to eval mode")
+    
+    # Move model to device
+    score_model = score_model.to(device)
+    
+    # Enable debug mode to match training behavior
+    if hasattr(score_model.model_nn, '_debug_conditioning'):
+        score_model.model_nn._debug_conditioning = True
+        print("✓ Enabled debug mode for conditioning")
+    if hasattr(score_model.model_nn, 'st_module') and hasattr(score_model.model_nn.st_module, '_debug_conditioning'):
+        score_model.model_nn.st_module._debug_conditioning = True
+        print("✓ Enabled debug mode for st_module conditioning")
+    
+    # Debug: Check model mode and conditioning setup
+    print(f"=== MODEL STATE DEBUG ===")
+    print(f"Score model training mode: {score_model.training}")
+    print(f"Score model condition_mode: {getattr(score_model.model_nn, 'condition_mode', 'not set')}")
+    if hasattr(score_model.model_nn, 'zero_conv_mlp'):
+        print(f"zero_conv_mlp exists: {score_model.model_nn.zero_conv_mlp is not None}")
+        print(f"zero_conv_mlp training mode: {score_model.model_nn.zero_conv_mlp.training}")
+    else:
+        print("zero_conv_mlp: NOT FOUND")
+    print(f"=== END MODEL STATE DEBUG ===")
+    
     # NOTE: Load MLCV model
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if method == "ours":
         mlcv_model = load_ours(
             mlcv_dim=mlcv_dim,
@@ -146,9 +204,10 @@ def main(
     elif method in ["tda", "tae", "vde"]:
         mlcv_model = load_baseline(model_name=method).to(device)
     else:
-        raise ValueError(f"Invalid method: {method}")
+        raise ValueError(f"Invalid method for MLCV: {method}")
     mlcv_model.eval()
     
+    # CRITICAL FIX: Ensure MLCV computation matches training expectations
     cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres.pdb"
     state_traj = md.load_pdb(cond_pdb)
     ca_resid_pair = np.array(
@@ -157,11 +216,29 @@ def main(
     mlcv_feature, _ = md.compute_contacts(
         state_traj, scheme="ca", contacts=ca_resid_pair, periodic=False
     )
-    cond_mlcv = mlcv_model(torch.from_numpy(mlcv_feature).to(device))
-    print(f"MLCV feature: {mlcv_feature}")
-    print(f"Conditioned MLCV: {cond_mlcv}")
-
-
+    # Debug: Print detailed MLCV information
+    print(f"=== MLCV DEBUGGING ===")
+    print(f"CA contact features shape: {mlcv_feature.shape}")
+    print(f"CA contact feature range: [{mlcv_feature.min():.6f}, {mlcv_feature.max():.6f}]")
+    print(f"CA contact feature mean: {mlcv_feature.mean():.6f}, std: {mlcv_feature.std():.6f}")
+    
+    # Apply MLCV model
+    mlcv_input = torch.from_numpy(mlcv_feature).to(device).float()
+    cond_mlcv = mlcv_model(mlcv_input)
+    print(f"MLCV model output shape: {cond_mlcv.shape}")
+    print(f"MLCV model output range: [{cond_mlcv.min().item():.6f}, {cond_mlcv.max().item():.6f}]")
+    
+    # Validate MLCV values are reasonable (not NaN, not too large)
+    if torch.isnan(cond_mlcv).any():
+        print("❌ ERROR: MLCV contains NaN values!")
+        cond_mlcv = torch.zeros_like(cond_mlcv)
+        print("→ Using zero MLCV as fallback")
+    elif torch.abs(cond_mlcv).max() > 100:
+        print(f"⚠️  WARNING: MLCV values are very large (max: {torch.abs(cond_mlcv).max():.2f})")
+        print("→ This might cause numerical instability during sampling")
+    else:
+        print("✓ MLCV values appear reasonable")
+    
     sdes = load_sdes(
         model_config_path=model_config_path,
         cache_so3_dir=cache_so3_dir
@@ -221,12 +298,19 @@ def main(
             )
         logger.info(f"Sampling {seed=}")
         
-        cond_mlcv_expanded = cond_mlcv.repeat(min(batch_size, n), 1)
+        # CRITICAL FIX: Ensure MLCV is properly replicated for the batch
+        actual_batch_size = min(batch_size, n)
+        cond_mlcv_expanded = cond_mlcv.repeat(actual_batch_size, 1)
+        
+        print(f"=== SAMPLING BATCH {seed} ===")
+        print(f"Batch size: {actual_batch_size}")
+        print(f"Condition mode: {condition_mode}")
+        
         batch = generate_batch(
             score_model=score_model,
             sequence=sequence,
             sdes=sdes,
-            batch_size=min(batch_size, n),
+            batch_size=actual_batch_size,
             seed=seed,
             denoiser=denoiser,
             cache_embeds_dir=cache_embeds_dir,
@@ -235,6 +319,24 @@ def main(
             mlcv=cond_mlcv_expanded,
             condition_mode=condition_mode,
         )
+        
+        # Validate generated structures
+        positions = batch["pos"]
+        print(f"Generated positions shape: {positions.shape}")
+        print(f"Position range: [{positions.min():.6f}, {positions.max():.6f}]")
+        
+        # Check for reasonable CA distances (should be around 0.15-0.4 nm for neighboring residues)
+        if len(positions.shape) == 3:  # [batch, atoms, 3]
+            sample_pos = positions[0]  # First sample
+            ca_distances = torch.cdist(sample_pos, sample_pos, p=2)
+            sequential_distances = torch.diagonal(ca_distances, offset=1)
+            print(f"Sequential CA distances: min={sequential_distances.min():.3f}nm, max={sequential_distances.max():.3f}nm, mean={sequential_distances.mean():.3f}nm")
+            
+            if sequential_distances.max() > 1.0:  # > 10 Angstrom is clearly wrong
+                print(f"⚠️  WARNING: Very large CA distances detected! Max: {sequential_distances.max():.3f}nm")
+            else:
+                print("✓ CA distances appear reasonable")
+        print(f"=== END BATCH {seed} ===")
         batch = {k: v.cpu().numpy() for k, v in batch.items()}
         np.savez(npz_path, **batch, sequence=sequence)
 

@@ -1,5 +1,6 @@
-_target_: bioemu.shortcuts.dpm_solver
+_target_: bioemu.shortcuts.training_rollout_denoiser
 _partial_: true
-eps_t: 0.001
+eps_t: 0.001  # Final target (for direct jump)
+mid_t: 0.786  # Stop point for dpm_solver (matches training)
 max_t: 0.99
-N: 50
+N: 7          # Match training N_rollout

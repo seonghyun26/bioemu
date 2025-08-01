@@ -3,6 +3,8 @@ score_model:
   mode: eval
   ckpt_path: ./config/checkpoint.pt
   cfg_path: ./config/score_config.yaml
+  init: zero
+  # init: rand
 training:
   seed: 0
   num_epochs: 100

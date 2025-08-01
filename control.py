@@ -226,7 +226,7 @@ def calc_tlc_loss(
     record_grad_steps: set[int],
     cfg: OmegaConf = None,
     condition_mode: str = "none",
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, dict]:
     device = batch[0].pos.device
     assert isinstance(batch, list)  # Not a Batch!
 
@@ -267,27 +267,112 @@ def calc_tlc_loss(
     )
     num_systems_sampled = len(batch)
     
+    # =================================================================
+    # STRUCTURE QUALITY MONITORING: Compute CA and C-N distances
+    # =================================================================
+    structure_metrics = {}
+    
+    try:
+        # Load reference structure to get atom indices
+        pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres_backbone.pdb")
+        ca_indices = pdb.topology.select('name CA')
+        c_indices = pdb.topology.select('name C')
+        n_indices = pdb.topology.select('name N')
+        
+        # Collect metrics across all generated samples
+        all_ca_sequential_distances = []
+        all_cn_distances = []
+        all_ca_pairwise_distances = []
+        
+        for idx in range(num_systems_sampled):
+            for rep in range(n_replications):
+                sample_idx = idx + rep * num_systems_sampled
+                generated_pos = x0.get_example(sample_idx).pos  # All atom positions [N_atoms, 3]
+                
+                # Extract CA positions
+                generated_ca_pos = generated_pos  # For CLN025, these should be CA positions already
+                
+                # 1. Sequential CA-CA distances
+                ca_seq_dists = torch.norm(generated_ca_pos[1:] - generated_ca_pos[:-1], dim=1)
+                all_ca_sequential_distances.extend(ca_seq_dists.detach().cpu().numpy())
+                
+                # 2. All pairwise CA distances  
+                ca_pairwise_dists = torch.cdist(generated_ca_pos, generated_ca_pos, p=2)
+                # Get upper triangular part (excluding diagonal)
+                n_ca = ca_pairwise_dists.shape[0]
+                i, j = torch.triu_indices(n_ca, n_ca, offset=1)
+                all_ca_pairwise_distances.extend(ca_pairwise_dists[i, j].detach().cpu().numpy())
+                
+                # 3. C-N peptide bond distances (if we have full backbone)
+                if len(generated_pos) > len(ca_indices):  # Full backbone available
+                    try:
+                        generated_c_pos = generated_pos[c_indices]
+                        generated_n_pos = generated_pos[n_indices]
+                        # C(i) to N(i+1) distances
+                        cn_dists = torch.norm(generated_c_pos[:-1] - generated_n_pos[1:], dim=1)
+                        all_cn_distances.extend(cn_dists.detach().cpu().numpy())
+                    except:
+                        pass  # Skip if indexing fails
+        
+        # Compute statistics
+        if all_ca_sequential_distances:
+            ca_seq_dists = torch.tensor(all_ca_sequential_distances)
+            structure_metrics.update({
+                'ca_sequential_dist_mean': ca_seq_dists.mean().item(),
+                'ca_sequential_dist_std': ca_seq_dists.std().item(),
+                'ca_sequential_dist_min': ca_seq_dists.min().item(),
+                'ca_sequential_dist_max': ca_seq_dists.max().item(),
+                'ca_sequential_dist_violations': (ca_seq_dists > 0.5).sum().item() / len(ca_seq_dists),  # >5Å violations
+            })
+        
+        if all_ca_pairwise_distances:
+            ca_pair_dists = torch.tensor(all_ca_pairwise_distances)
+            structure_metrics.update({
+                'ca_pairwise_dist_mean': ca_pair_dists.mean().item(),
+                'ca_pairwise_dist_std': ca_pair_dists.std().item(),
+                'ca_pairwise_dist_max': ca_pair_dists.max().item(),
+            })
+        
+        if all_cn_distances:
+            cn_dists = torch.tensor(all_cn_distances)
+            structure_metrics.update({
+                'cn_bond_dist_mean': cn_dists.mean().item(),
+                'cn_bond_dist_std': cn_dists.std().item(),
+                'cn_bond_dist_min': cn_dists.min().item(),
+                'cn_bond_dist_max': cn_dists.max().item(),
+                'cn_bond_violations': (cn_dists > 0.18).sum().item() / len(cn_dists),  # >1.8Å violations
+            })
+        
+        # Debug output
+        if cfg.log.debug and structure_metrics:
+            print(f"=== STRUCTURE QUALITY METRICS ===")
+            for key, value in structure_metrics.items():
+                print(f"{key}: {value:.4f}")
+            print(f"=== END STRUCTURE METRICS ===")
+            
+    except Exception as e:
+        print(f"Warning: Could not compute structure metrics: {e}")
+        structure_metrics = {}
+    
+    # =================================================================
+    
     if cfg.data.representation == "cad":
-        # Fix: Use all replications, not just the first sample
         generated_ca_distance = torch.empty(num_systems_sampled, n_replications, 45, device=device)
         for idx in range(num_systems_sampled):
             for rep in range(n_replications):
-                sample_idx = idx + rep * num_systems_sampled  # Get the correct sample index
+                sample_idx = idx + rep * num_systems_sampled
                 generated_ca_pos = x0.get_example(sample_idx).pos
                 generated_ca_pair_distances = torch.cdist(generated_ca_pos, generated_ca_pos, p=2)
                 n = generated_ca_pair_distances.shape[0]
                 i, j = torch.triu_indices(n, n, offset=1)
                 generated_ca_distance[idx, rep] = generated_ca_pair_distances[i, j]
-        
-        # Compute loss over all replications (mean over replications)
-        generated_ca_distance_mean = generated_ca_distance.mean(dim=1)  # Average over replications
+        generated_ca_distance_mean = generated_ca_distance.mean(dim=1)
         loss = torch.nn.functional.mse_loss(generated_ca_distance_mean, target)
     
     elif cfg.data.representation == "cad-pos":
         pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres_backbone.pdb")
         ca_indices = pdb.topology.select('name CA')
         
-        # Fix: Use all replications
         loss = torch.tensor(0.0, device=device)
         for idx in range(num_systems_sampled):
             system_loss = torch.tensor(0.0, device=device)
@@ -297,7 +382,7 @@ def calc_tlc_loss(
                 generated_ca_pos = x0.get_example(sample_idx).pos
                 target_ca_pos = target[idx, ca_indices]
                 system_loss = system_loss + kabsch_rmsd(generated_ca_pos, target_ca_pos)
-            loss = loss + (system_loss / n_replications)  # Average over replications
+            loss = loss + (system_loss / n_replications)
         loss = loss / num_systems_sampled
     
     else:
@@ -312,7 +397,7 @@ def calc_tlc_loss(
     # generated_ca_distances_sum = generated_ca_distances_sum / num_systems_sampled
     # generated_ca_distances_distribution = generated_ca_distances_distribution / num_systems_sampled
     
-    return loss
+    return loss, structure_metrics
 
 
 def _rollout(
@@ -387,6 +472,26 @@ def _get_x0_given_xt_and_score(
     return (x + sigma_t**2 * score) / alpha_t
     
 
+def _add_zero_conv_mlp(
+    init_mode: str,
+    hidden_dim: int,
+    mlcv_dim: int,
+):
+    if init_mode == "zero":
+        zero_linear = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
+        nn.init.zeros_(zero_linear.weight)  # Keep bias zero
+        nn.init.zeros_(zero_linear.bias)  # Keep bias zero
+        zero_mlp = nn.Sequential(zero_linear)
+    elif init_mode == "rand":
+        zero_linear = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
+        nn.init.normal_(zero_linear.weight, mean=0.0, std=1e-4)  # Very small random weights
+        nn.init.zeros_(zero_linear.bias)  # Keep bias zero
+        zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+    else:
+        raise ValueError(f"Invalid initialization method: {init_mode}")
+    
+    return zero_mlp
+
 
 @hydra.main(
     version_base=None,
@@ -441,6 +546,10 @@ def main(cfg):
         score_model.eval()
     else:
         raise ValueError(f"Score model mode {cfg.model.score_model.mode} not supported")
+    # if cfg.log.debug:
+        # score_model.model_nn._debug_conditioning = True
+        # score_model.model_nn.st_module._debug_conditioning = True
+        
     
     # NOTE: add zero conv MLP to score model
     if cfg.model.mlcv_model.condition_mode in ["backbone", "backbone-both"]:
@@ -450,59 +559,46 @@ def main(cfg):
     else:
         raise ValueError(f"Condition type {cfg.model.mlcv_model.condition_mode} not supported")
     if cfg.model.mlcv_model.condition_mode in ["input", "latent", "backbone"]:
-        zero_linear = nn.Linear(hidden_dim + cfg.model.mlcv_model.mlcv_dim, hidden_dim)
-        # Fix: Use small random initialization instead of zero to avoid dead ReLU
-        nn.init.normal_(zero_linear.weight, mean=0.0, std=1e-4)  # Very small random weights
-        nn.init.zeros_(zero_linear.bias)  # Keep bias zero
-        # CRITICAL FIX: Add back nonlinearity! Linear layer alone can't learn complex mappings
-        zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+        zero_mlp = _add_zero_conv_mlp(
+            init_mode=cfg.model.score_model.init,
+            hidden_dim=hidden_dim,
+            mlcv_dim=cfg.model.mlcv_model.mlcv_dim,
+        )
         score_model.model_nn.add_module(f"zero_conv_mlp", zero_mlp)
         zero_conv_mlp = score_model.model_nn.get_submodule("zero_conv_mlp")
         zero_conv_mlp.train()
         
-        # Enable debug mode for the model
-        if cfg.log.debug:
-            score_model.model_nn._debug_conditioning = True
-            score_model.model_nn.st_module._debug_conditioning = True
-        
-        # Debug: Add hook to see if zero_conv_mlp is actually called
-        # if cfg.log.debug:
-        #     def debug_hook(module, input, output):
-        #         print(f"🔥 zero_conv_mlp called! Input shape: {input[0].shape}, Output shape: {output.shape}")
-        #         print(f"Input requires_grad: {input[0].requires_grad}, Output requires_grad: {output.requires_grad}")
-        #     zero_conv_mlp.register_forward_hook(debug_hook)
-    
     elif cfg.model.mlcv_model.condition_mode == "input-control":
         for i in range(8):
-            zero_linear = nn.Linear(hidden_dim + cfg.model.mlcv_model.mlcv_dim, hidden_dim)
-            # Fix: Use small random initialization instead of zero to avoid dead ReLU
-            nn.init.normal_(zero_linear.weight, mean=0.0, std=1e-4)  # Very small random weights
-            nn.init.zeros_(zero_linear.bias)  # Keep bias zero
-            zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+            zero_mlp = _add_zero_conv_mlp(
+                init_mode=cfg.model.score_model.init,
+                hidden_dim=hidden_dim,
+                mlcv_dim=cfg.model.mlcv_model.mlcv_dim,
+            )
             zero_mlp.train()
             score_model.model_nn.st_module.encoder.add_module(f"zero_conv_mlp_{i}", zero_mlp)
     
     elif cfg.model.mlcv_model.condition_mode == "backbone-both":
-        zero_linear_pos = nn.Linear(hidden_dim + cfg.model.mlcv_model.mlcv_dim, hidden_dim)
-        # Fix: Use small random initialization instead of zero to avoid dead ReLU
-        nn.init.normal_(zero_linear_pos.weight, mean=0.0, std=1e-4)  # Very small random weights
-        nn.init.zeros_(zero_linear_pos.bias)  # Keep bias zero
-        zero_mlp_pos = nn.Sequential(zero_linear_pos, nn.ReLU())
+        zero_mlp_pos = _add_zero_conv_mlp(
+            init_mode=cfg.model.score_model.init,
+            hidden_dim=hidden_dim,
+            mlcv_dim=cfg.model.mlcv_model.mlcv_dim,
+        )
         zero_mlp_pos.train()
         score_model.model_nn.add_module(f"zero_conv_mlp_pos", zero_mlp_pos)
         zero_conv_mlp_pos = score_model.model_nn.get_submodule("zero_conv_mlp_pos")
         
-        zero_linear_orient = nn.Linear(2 + cfg.model.mlcv_model.mlcv_dim, 3)  # 2 rotation features + mlcv_dim -> 3 axis-angle values
-        # Fix: Use small random initialization instead of zero to avoid dead ReLU
-        nn.init.normal_(zero_linear_orient.weight, mean=0.0, std=1e-4)  # Very small random weights
-        nn.init.zeros_(zero_linear_orient.bias)  # Keep bias zero
-        zero_mlp_orient = nn.Sequential(zero_linear_orient, nn.ReLU())
+        zero_mlp_orient = _add_zero_conv_mlp(
+            init_mode=cfg.model.score_model.init,
+            hidden_dim=hidden_dim,
+            mlcv_dim=cfg.model.mlcv_model.mlcv_dim,
+        )
         zero_mlp_orient.train()
         score_model.model_nn.add_module(f"zero_conv_mlp_orient", zero_mlp_orient)
         zero_conv_mlp_orient = score_model.model_nn.get_submodule("zero_conv_mlp_orient")
-    
     for p in score_model.parameters():
         p.requires_grad = True
+    
     if cfg.log.score_model.watch:
         if cfg.model.mlcv_model.condition_mode == "backbone-both":
             wandb.watch(
@@ -529,6 +625,7 @@ def main(cfg):
                 log_freq=cfg.log.score_model.watch_freq,
             )
     
+    
     # NOTE: MLCV model
     method = cfg.model.mlcv_model.name
     if method == "ours":
@@ -552,17 +649,6 @@ def main(cfg):
             log=cfg.log.mlcv_model.log,
             log_freq=cfg.log.mlcv_model.watch_freq,
         )
-    
-    # NOTE: Load training
-    # repo_dir = Path("~/prj-mlcv/lib/bioemu").expanduser()
-    # rollout_config_path = repo_dir / cfg.model.sampling.rollout_path
-    # rollout_config = yaml.safe_load(rollout_config_path.read_text())
-    mid_t = cfg.model.rollout.mid_t
-    N_rollout = cfg.model.rollout.N_rollout
-    record_grad_steps = cfg.model.rollout.record_grad_steps
-    learning_rate = cfg.model.training.learning_rate
-    num_epochs = cfg.model.training.num_epochs
-    batch_size = cfg.model.training.batch_size
     watch_param_list = list(mlcv_model.parameters())
     if cfg.model.score_model.mode == "train":
         watch_param_list = watch_param_list + list(score_model.parameters())
@@ -573,6 +659,15 @@ def main(cfg):
             watch_param_list = watch_param_list + list(score_model.model_nn.st_module.encoder.get_submodule(f"zero_conv_mlp_{i}").parameters())
     else:
         watch_param_list = watch_param_list + list(zero_conv_mlp.parameters())
+    
+    
+    # NOTE: Load training
+    mid_t = cfg.model.rollout.mid_t
+    N_rollout = cfg.model.rollout.N_rollout
+    record_grad_steps = cfg.model.rollout.record_grad_steps
+    learning_rate = cfg.model.training.learning_rate
+    num_epochs = cfg.model.training.num_epochs
+    batch_size = cfg.model.training.batch_size
     optimizer = torch.optim.AdamW(
         watch_param_list,
         lr=learning_rate,
@@ -620,11 +715,11 @@ def main(cfg):
     )
     for epoch in pbar:
         total_loss = 0
+        current_structure_metrics = {}  # Initialize structure metrics for this epoch
 
         if epoch > cfg.model.score_model.last_training * num_epochs:
             score_model.train()
         
-        # Fix: Ensure conditioning modules are trainable even when score model is in eval mode
         if cfg.model.mlcv_model.condition_mode == "backbone-both":
             zero_conv_mlp_pos.train()
             zero_conv_mlp_orient.train()
@@ -645,20 +740,13 @@ def main(cfg):
             timelagged_data = batch["timelagged_data"]
             mlcv = mlcv_model(current_data)
             
-            # Debug: Check if mlcv is None or has issues
-            # if cfg.log.debug:
-            #     print(f"MLCV shape: {mlcv.shape if mlcv is not None else 'None'}")
-            #     print(f"MLCV requires_grad: {mlcv.requires_grad if mlcv is not None else 'None'}")
-            #     print(f"MLCV values: {mlcv.flatten()[:5] if mlcv is not None else 'None'}")
-
-            # Critical debug: Check if conditioning is actually changing the outputs
-            if cfg.log.debug and batch_idx == 0:  # Only debug first batch to avoid spam
+            if cfg.log.debug_mlcv and batch_idx == 0:  # Only debug first batch to avoid spam
                 print(f"=== CONDITIONING EFFECT DEBUG ===")
                 print(f"MLCV values: {mlcv.flatten()[:10].detach().cpu().numpy()}")
                 
                 # Test: Run the same input with and without MLCV to see if outputs differ
                 with torch.no_grad():
-                    loss_with_mlcv = calc_tlc_loss(
+                    loss_with_mlcv, _ = calc_tlc_loss(
                         score_model=score_model,
                         mlcv=mlcv,
                         target=timelagged_data,
@@ -674,7 +762,7 @@ def main(cfg):
                     
                     # Create zero MLCV for comparison
                     mlcv_zero = torch.zeros_like(mlcv)
-                    loss_without_mlcv = calc_tlc_loss(
+                    loss_without_mlcv, _ = calc_tlc_loss(
                         score_model=score_model,
                         mlcv=mlcv_zero,
                         target=timelagged_data,
@@ -690,7 +778,7 @@ def main(cfg):
                     
                     # Also test with random MLCV
                     mlcv_random = torch.randn_like(mlcv) * 0.1
-                    loss_with_random_mlcv = calc_tlc_loss(
+                    loss_with_random_mlcv, _ = calc_tlc_loss(
                         score_model=score_model,
                         mlcv=mlcv_random,
                         target=timelagged_data,
@@ -716,7 +804,7 @@ def main(cfg):
                     print("✅ Conditioning affects loss (good!)")
                 print(f"=== END DEBUG ===")
 
-            loss = calc_tlc_loss(
+            loss, structure_metrics = calc_tlc_loss(
                 score_model=score_model,
                 mlcv=mlcv,
                 target=timelagged_data,
@@ -730,6 +818,10 @@ def main(cfg):
                 cfg=cfg,
             )
             total_loss = total_loss + loss
+            
+            # Collect structure metrics for batch-level logging
+            if batch_idx == 0:  # Store metrics from first batch for logging
+                current_structure_metrics = structure_metrics
             loss.backward()
             
             # Debug: Check gradient norms before clipping
@@ -794,32 +886,54 @@ def main(cfg):
                     else:
                         print(f"✓ Zero conv module {i} has gradients!")
                 
-            
             optimizer.step()
         
         scheduler.step()
         pbar.set_description(f"Loss: {total_loss/num_batches:.6f}")
-        wandb.log({
+        
+        # Prepare logging data
+        log_data = {
             "loss": total_loss/num_batches,
-            # "generated_ca_distances_sum": total_generated_ca_distances_sum/num_batches,
             "lr": optimizer.param_groups[0]['lr'],
             "epoch": epoch,
-            },
-            step=epoch,
-        )
+        }
+        
+        # Add structure quality metrics if available
+        if 'current_structure_metrics' in locals() and current_structure_metrics:
+            for key, value in current_structure_metrics.items():
+                log_data[f"structure/{key}"] = value
+            
+            # Additional logging for structure quality monitoring
+            if 'ca_sequential_dist_mean' in current_structure_metrics:
+                ca_mean = current_structure_metrics['ca_sequential_dist_mean']
+                ca_violations = current_structure_metrics.get('ca_sequential_dist_violations', 0)
+                log_data['structure/ca_health_score'] = max(0, 1 - ca_violations)  # Health score: 1 - violation_rate
+                log_data['structure/ca_realistic'] = 1 if 0.3 <= ca_mean <= 0.4 else 0  # 1 if CA distances are realistic
+        
+        wandb.log(log_data, step=epoch)
         
         # Save checkpoint
         if (epoch + 1) % cfg.log.ckpt_freq == 0:
-            torch.save({
+            checkpoint = {
                 'epoch': epoch,
                 'mlcv_state_dict': mlcv_model.state_dict(),
                 'model_state_dict': score_model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-            }, f"model/{cfg.log.date}/checkpoint_{epoch+1}.pt")
+                'condition_mode': cfg.model.mlcv_model.condition_mode,
+                'mlcv_dim': cfg.model.mlcv_model.mlcv_dim,
+            }
+            torch.save(checkpoint, f"model/{cfg.log.date}/checkpoint_{epoch+1}.pt")
         
+    # Save final model weights
     torch.save({
         'mlcv_state_dict': mlcv_model.state_dict(),
-    }, f"model/{cfg.log.date}/mlcv.pt")
+        'model_state_dict': score_model.state_dict(),
+        'condition_mode': cfg.model.mlcv_model.condition_mode,
+        'mlcv_dim': cfg.model.mlcv_model.mlcv_dim,
+    }, f"model/{cfg.log.date}/final.pt")    
+    torch.save({
+        'mlcv_state_dict': mlcv_model.state_dict(),
+    }, f"model/{cfg.log.date}/mlcv_model.pt")
     
     run.finish()
     
