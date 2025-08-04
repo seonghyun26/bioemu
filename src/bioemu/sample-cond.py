@@ -15,6 +15,7 @@ import yaml
 from torch_geometric.data.batch import Batch
 from tqdm import tqdm
 from itertools import combinations
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 import torch.nn as nn
 import mdtraj as md
@@ -48,29 +49,35 @@ SupportedDenoisersLiteral = Literal["dpm", "heun"]
 SUPPORTED_DENOISERS = list(typing.get_args(SupportedDenoisersLiteral))
 
 
+@hydra.main(
+    version_base=None,
+    config_path="../../config",
+    config_name="sampling"
+)
 @print_traceback_on_exception
 @torch.no_grad()
-def main(
-    sequence: str | Path,
-    num_samples: int,
-    output_dir: str | Path,
-    batch_size_100: int = 10,
-    model_name: Literal["bioemu-v1.0", "bioemu-v1.1"] | None = "bioemu-v1.1",
-    ckpt_path: str | Path | None = None,
-    model_config_path: str | Path | None = None,
-    denoiser_type: SupportedDenoisersLiteral | None = "dpm",
-    denoiser_config_path: str | Path | None = None,
-    cache_embeds_dir: str | Path | None = None,
-    cache_so3_dir: str | Path | None = None,
-    msa_host_url: str | None = None,
-    filter_samples: bool = True,
-    method: str = "ours",
-    date: str = "debug",
-    mlcv_dim: int = 1,
-    normalization_factor: float = 1.0,
-    condition_mode: str = "none",
-    ckpt_idx: str = "100",
-) -> None:
+# def main(
+#     sequence: str | Path,
+#     num_samples: int,
+#     output_dir: str | Path,
+#     batch_size_100: int = 10,
+#     model_name: Literal["bioemu-v1.0", "bioemu-v1.1"] | None = "bioemu-v1.1",
+#     ckpt_path: str | Path | None = None,
+#     model_config_path: str | Path | None = None,
+#     denoiser_type: SupportedDenoisersLiteral | None = "dpm",
+#     denoiser_config_path: str | Path | None = None,
+#     cache_embeds_dir: str | Path | None = None,
+#     cache_so3_dir: str | Path | None = None,
+#     msa_host_url: str | None = None,
+#     filter_samples: bool = True,
+#     method: str = "ours",
+#     date: str = "debug",
+#     mlcv_dim: int = 1,
+#     normalization_factor: float = 1.0,
+#     condition_mode: str = "none",
+#     ckpt_idx: str = "100",
+# ) -> None:
+def main(cfg: DictConfig) -> None:
     """
     Generate samples for a specified sequence, using a trained model.
 
@@ -94,17 +101,25 @@ def main(
         filter_samples: Filter out unphysical samples with e.g. long bond distances or steric clashes.
     """
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    output_dir = Path(output_dir).expanduser().resolve()
+    output_dir = Path(cfg.sample.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)  # Fail fast if output_dir is non-writeable
-
-    if ckpt_idx is not None:
-        ckpt_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/final_model.pt"
+    condition_mode = cfg.model.mlcv_model.condition_mode
+    method = cfg.model.mlcv_model.name
+    mlcv_dim = cfg.model.mlcv_model.mlcv_dim
+    
+    cache_embeds_dir = None
+    cache_so3_dir = None
+    msa_host_url = None
+    denoiser_config_path = None
+    
+    ckpt_path = cfg.sample.ckpt_path
+    model_config_path = cfg.sample.model_config_path
     ckpt_path, model_config_path = maybe_download_checkpoint(
-        model_name=model_name, ckpt_path=ckpt_path, model_config_path=model_config_path
+        model_name=cfg.sample.model_name, ckpt_path=ckpt_path, model_config_path=model_config_path
     )
     with open(model_config_path) as f:
         model_config = yaml.safe_load(f)
-    model_config["score_model"]["condition_mode"] = condition_mode
+    model_config["score_model"]["condition_mode"] = cfg.model.mlcv_model.condition_mode
     score_model: DiGConditionalScoreModel = hydra.utils.instantiate(model_config["score_model"])
     
     # NOTE: Load score model - CRITICAL FIX: Load base model first, then add conditioning modules
@@ -130,22 +145,15 @@ def main(
     
     if condition_mode in ["input", "latent", "backbone"]:
         zero_linear = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
-        # CRITICAL: Use the same initialization as training
-        nn.init.normal_(zero_linear.weight, mean=0.0, std=1e-4)
-        nn.init.zeros_(zero_linear.bias)
         zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
         score_model.model_nn.add_module(f"zero_conv_mlp", zero_mlp)
         
     elif condition_mode == "backbone-both":
         zero_linear_pos = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
-        nn.init.normal_(zero_linear_pos.weight, mean=0.0, std=1e-4)
-        nn.init.zeros_(zero_linear_pos.bias)
         zero_mlp_pos = nn.Sequential(zero_linear_pos, nn.ReLU())
         score_model.model_nn.add_module(f"zero_conv_mlp_pos", zero_mlp_pos)
         
         zero_linear_orient = nn.Linear(2 + mlcv_dim, 3)
-        nn.init.normal_(zero_linear_orient.weight, mean=0.0, std=1e-4)
-        nn.init.zeros_(zero_linear_orient.bias)
         zero_mlp_orient = nn.Sequential(zero_linear_orient, nn.ReLU())
         score_model.model_nn.add_module(f"zero_conv_mlp_orient", zero_mlp_orient)
     
@@ -197,8 +205,8 @@ def main(
     if method == "ours":
         mlcv_model = load_ours(
             mlcv_dim=mlcv_dim,
-            dim_normalization=False,
-            normalization_factor=normalization_factor,
+            dim_normalization=cfg.model.mlcv_model.dim_normalization,
+            normalization_factor=cfg.model.mlcv_model.normalization_factor,
         ).to(device)
         mlcv_model.load_state_dict(cond_ft_model_state["mlcv_state_dict"])
     elif method in ["tda", "tae", "vde"]:
@@ -207,8 +215,8 @@ def main(
         raise ValueError(f"Invalid method for MLCV: {method}")
     mlcv_model.eval()
     
-    # CRITICAL FIX: Ensure MLCV computation matches training expectations
-    cond_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres.pdb"
+    cond_pdb = cfg.sample.cond_pdb
+    print(f"Loading condition pdb: {cond_pdb}")
     state_traj = md.load_pdb(cond_pdb)
     ca_resid_pair = np.array(
         [(a.index, b.index) for a, b in combinations(list(state_traj.topology.residues), 2)]
@@ -245,14 +253,14 @@ def main(
     )
 
     # User may have provided an MSA file instead of a sequence. This will be used for embeddings.
-    msa_file = sequence if str(sequence).endswith(".a3m") else None
+    msa_file = cfg.sample.sequence if str(cfg.sample.sequence).endswith(".a3m") else None
 
     if msa_file is not None and msa_host_url is not None:
         logger.warning(f"msa_host_url is ignored because MSA file {msa_file} is provided.")
 
     # Parse FASTA or A3M file if sequence is a file path. Extract the actual sequence.
     # Check input sequence is valid
-    sequence = parse_sequence(sequence)
+    sequence = parse_sequence(cfg.sample.sequence)
     check_protein_valid(sequence)
 
     fasta_path = output_dir / "sequence.fasta"
@@ -265,32 +273,34 @@ def main(
         # Save FASTA file in output_dir
         write_fasta([sequence], fasta_path)
 
-    if denoiser_config_path is None:
+    if cfg.sample.denoiser_config_path is None or cfg.sample.denoiser_config_path == "None":
         assert (
-            denoiser_type in SUPPORTED_DENOISERS
+            cfg.sample.denoiser_type in SUPPORTED_DENOISERS
         ), f"denoiser_type must be one of {SUPPORTED_DENOISERS}"
-        denoiser_config_path = DEFAULT_DENOISER_CONFIG_DIR / f"{denoiser_type}.yaml"
+        denoiser_config_path = DEFAULT_DENOISER_CONFIG_DIR / f"{cfg.sample.denoiser_type}.yaml"
+    else:
+        denoiser_config_path = cfg.sample.denoiser_config_path
 
     with open(denoiser_config_path) as f:
         denoiser_config = yaml.safe_load(f)
     denoiser = hydra.utils.instantiate(denoiser_config)
 
     logger.info(
-        f"Sampling {num_samples} structures for sequence of length {len(sequence)} residues..."
+        f"Sampling {cfg.sample.num_samples} structures for sequence of length {len(sequence)} residues..."
     )
-    batch_size = int(batch_size_100 * (100 / len(sequence)) ** 2)
+    batch_size = int(cfg.sample.batch_size_100 * (100 / len(sequence)) ** 2)
     if batch_size == 0:
         logger.warning(f"Sequence {sequence} may be too long. Attempting with batch_size = 1.")
         batch_size = 1
-    logger.info(f"Using batch size {min(batch_size, num_samples)}")
+    logger.info(f"Using batch size {min(batch_size, cfg.sample.num_samples)}")
 
 
     existing_num_samples = count_samples_in_output_dir(output_dir)
     logger.info(f"Found {existing_num_samples} previous samples in {output_dir}.")
     for seed in tqdm(
-        range(existing_num_samples, num_samples, batch_size), desc="Sampling batches..."
+        range(existing_num_samples, cfg.sample.num_samples, batch_size), desc="Sampling batches..."
     ):
-        n = min(batch_size, num_samples - seed)
+        n = min(batch_size, cfg.sample.num_samples - seed)
         npz_path = output_dir / format_npz_samples_filename(seed, n)
         if npz_path.exists():
             raise ValueError(
@@ -318,6 +328,7 @@ def main(
             msa_host_url=msa_host_url,
             mlcv=cond_mlcv_expanded,
             condition_mode=condition_mode,
+            cfg=cfg,
         )
         
         # Validate generated structures
@@ -349,15 +360,15 @@ def main(
     node_orientations = torch.tensor(
         np.concatenate([np.load(f)["node_orientations"] for f in samples_files])
     )
-    backbone_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres_backbone.pdb"
+    # backbone_pdb = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres_backbone.pdb"
     save_pdb_and_xtc(
         pos_nm=positions,
         node_orientations=node_orientations,
-        # topology_path=output_dir / "topology.pdb",
-        topology_path=backbone_pdb,
+        topology_path=output_dir / "topology.pdb",
+        # topology_path=backbone_pdb,
         xtc_path=output_dir / "samples.xtc",
         sequence=sequence,
-        filter_samples=filter_samples,
+        filter_samples=cfg.sample.filter_samples,
     )
     logger.info(f"Completed. Your samples are in {output_dir}.")
 
@@ -417,6 +428,7 @@ def generate_batch(
     msa_file: str | Path | None = None,
     msa_host_url: str | None = None,
     condition_mode: str = "none",
+    cfg: OmegaConf = None,
 ) -> dict[str, torch.Tensor]:
     """Generate one batch of samples, using GPU if available.
 
@@ -448,7 +460,8 @@ def generate_batch(
         batch=context_batch,
         score_model=score_model,
         mlcv=mlcv,
-        condition_mode=condition_mode
+        condition_mode=condition_mode,
+        cfg=cfg,
     )
     assert isinstance(sampled_chemgraph_batch, Batch)
     sampled_chemgraphs = sampled_chemgraph_batch.to_data_list()
@@ -461,8 +474,6 @@ def generate_batch(
 if __name__ == "__main__":
     import logging
 
-    import fire
-
     logging.basicConfig(level=logging.DEBUG)
 
-    fire.Fire(main)
+    main()

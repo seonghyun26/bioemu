@@ -1,0 +1,15 @@
+sequence: YYDPETGTWY
+num_samples: 100
+output_dir: ./res/cln025/0729_091523
+batch_size_100: 10
+model_name: bioemu-v1.1
+ckpt_path: /home/shpark/prj-mlcv/lib/bioemu/model/0729_081523/final_model.pt
+model_config_path: /home/shpark/prj-mlcv/lib/bioemu/config/model_config.yaml
+denoiser_type: dpm
+denoiser_config_path: None
+filter_samples: False
+max_ca_seq_distance: 4.5
+max_cn_seq_distance: 3.0
+clash_distance: 1.0
+# cond_pdb: /home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres.pdb
+cond_pdb: /home/shpark/prj-mlcv/lib/DESRES/data/folded_6bond.pdb

@@ -5,6 +5,7 @@ from typing import cast
 import numpy as np
 import torch
 from torch_geometric.data.batch import Batch
+from omegaconf import OmegaConf
 
 from .chemgraph import ChemGraph
 from .sde_lib import SDE, CosineVPSDE
@@ -275,6 +276,7 @@ def dpm_solver(
     mlcv: torch.Tensor,
     record_grad_steps: set[int] = set(),
     condition_mode: str = "none",
+    cfg: OmegaConf = None,
 ) -> ChemGraph:
 
     """
@@ -388,18 +390,18 @@ def dpm_solver(
         # For input mode, conditioning is applied inside the score model during get_score() calls
         # No need to modify the batch here, just ensure MLCV is passed to get_score()
         # Debug: Verify input conditioning will work
-        if hasattr(score_model, 'model_nn') and hasattr(score_model.model_nn, 'zero_conv_mlp'):
+        if cfg and cfg.log.debug_mlcv and hasattr(score_model, 'model_nn') and hasattr(score_model.model_nn, 'zero_conv_mlp'):
             print(f"        [dpm_solver] Input conditioning: MLCV will be applied via score model")
             print(f"        [dpm_solver] MLCV shape: {mlcv.shape}, range: [{mlcv.min().item():.3f}, {mlcv.max().item():.3f}]")
-        else:
-            print(f"        [dpm_solver] WARNING: Input conditioning requested but zero_conv_mlp not found!")
     
     elif condition_mode in ["latent", "input-control"] and mlcv is not None:
         # These modes should also work through the score model, not direct batch modification
-        print(f"        [dpm_solver] {condition_mode} conditioning: MLCV will be applied via score model")
+        if cfg.log.debug_mlcv:
+            print(f"        [dpm_solver] {condition_mode} conditioning: MLCV will be applied via score model")
     
     elif condition_mode != "none" and mlcv is not None:
-        print(f"        [dpm_solver] WARNING: Unknown condition_mode '{condition_mode}' - no conditioning applied!")
+        if cfg.log.debug_mlcv:
+            print(f"        [dpm_solver] WARNING: Unknown condition_mode '{condition_mode}' - no conditioning applied!")
     
     so3_sde = sdes["node_orientations"]
     assert isinstance(so3_sde, SO3SDE)
@@ -414,7 +416,7 @@ def dpm_solver(
         # Evaluate score
         with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
             # Debug: Check MLCV before score computation
-            if i == 0 and condition_mode != "none" and mlcv is not None:
+            if cfg.log.debug_mlcv and i == 0 and condition_mode != "none" and mlcv is not None:
                 print(f"        [dpm_solver] Step {i}: Passing MLCV to get_score")
                 print(f"        [dmp_solver] MLCV shape: {mlcv.shape}, values: {mlcv.flatten()[:3]}")
             
@@ -484,8 +486,7 @@ def dpm_solver(
         # Correction step
         # Evaluate score at updated pos and node orientations
         with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
-            # Debug: Check MLCV in correction step  
-            if i == 0 and condition_mode != "none" and mlcv is not None:
+            if cfg.log.debug_mlcv and i == 0 and condition_mode != "none" and mlcv is not None:
                 print(f"        [dpm_solver] Correction step {i}: Passing MLCV to get_score")
             
             score_u = get_score(
@@ -542,6 +543,7 @@ def training_rollout_denoiser(
     N: int = 7,           # Match training N_rollout
     mlcv: torch.Tensor = None,
     condition_mode: str = "none",
+    cfg: OmegaConf = None,
 ) -> ChemGraph:
     """
     Denoiser that exactly replicates the training rollout process:
@@ -566,7 +568,8 @@ def training_rollout_denoiser(
         score_model=score_model,
         mlcv=mlcv,          # Pass MLCV for conditioning
         condition_mode=condition_mode,
-        record_grad_steps=set(),  # No gradients during sampling
+        record_grad_steps=set(),  # No gradients during sampling,
+        cfg=cfg,
     )
 
     print(f"        [training_rollout_denoiser] Step 2: Direct jump {mid_t} → clean x0")

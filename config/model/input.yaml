@@ -11,7 +11,7 @@ training:
   batch_size: 256
   learning_rate: 1e-8
   loss: cad_rmsd
-  gradient_clip_val: 1.0  # Add gradient clipping (adjust as needed)
+  gradient_clip_val: 1
   scheduler:
     name: CosineAnnealingWarmUpRestarts
     T_mult: 1

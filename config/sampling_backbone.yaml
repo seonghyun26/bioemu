@@ -1,0 +1,13 @@
+# Configuration for backbone conditioning
+defaults:
+  - sampling  # Inherits from base sampling config
+
+# Override specific parameters for backbone conditioning
+condition_mode: "backbone"
+mlcv_dim: 2
+method: "ours"
+num_samples: 50
+output_dir: "./output_backbone"
+
+# Model parameters optimized for backbone conditioning
+batch_size_100: 8 

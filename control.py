@@ -264,6 +264,7 @@ def calc_tlc_loss(
         mlcv=mlcv_replicated,  # Use replicated MLCV
         condition_mode=condition_mode,
         record_grad_steps=record_grad_steps,
+        cfg=cfg,
     )
     num_systems_sampled = len(batch)
     
@@ -410,6 +411,7 @@ def _rollout(
     mlcv: torch.Tensor,
     condition_mode: str = "none",
     record_grad_steps: set[int] = set(),
+    cfg: OmegaConf = None,
 ):
     """Fast rollout to get a sampled structure in a small number of steps.
     Note that in the last step, only the positions are calculated, and not the orientations,
@@ -434,6 +436,7 @@ def _rollout(
         mlcv=mlcv,
         condition_mode=condition_mode,
         record_grad_steps=record_grad_steps,  # Enable gradients for all steps
+        cfg=cfg,
     )
 
     # Predict clean x (x0) from x_mid in a single jump.
@@ -477,18 +480,69 @@ def _add_zero_conv_mlp(
     hidden_dim: int,
     mlcv_dim: int,
 ):
+    """
+    Create a conditioning MLP with specified initialization.
+    
+    Args:
+        init_mode: Initialization method ('zero', 'rand', 'xavier', 'xavier_normal')
+        hidden_dim: Hidden dimension of the model
+        mlcv_dim: MLCV dimension
+    """
     if init_mode == "zero":
         zero_linear = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
-        nn.init.zeros_(zero_linear.weight)  # Keep bias zero
-        nn.init.zeros_(zero_linear.bias)  # Keep bias zero
+        nn.init.zeros_(zero_linear.weight)  # Zero initialization
+        nn.init.zeros_(zero_linear.bias)  # Zero bias 
         zero_mlp = nn.Sequential(zero_linear)
     elif init_mode == "rand":
         zero_linear = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
         nn.init.normal_(zero_linear.weight, mean=0.0, std=1e-4)  # Very small random weights
-        nn.init.zeros_(zero_linear.bias)  # Keep bias zero
+        nn.init.zeros_(zero_linear.bias)  # Zero bias
+        zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+    elif init_mode == "xavier":
+        zero_linear = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
+        nn.init.xavier_uniform_(zero_linear.weight)  # Xavier uniform initialization
+        nn.init.zeros_(zero_linear.bias)  # Zero bias
+        zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+    elif init_mode == "xavier_normal":
+        zero_linear = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
+        nn.init.xavier_normal_(zero_linear.weight)  # Xavier normal initialization
+        nn.init.zeros_(zero_linear.bias)  # Zero bias
         zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
     else:
-        raise ValueError(f"Invalid initialization method: {init_mode}")
+        raise ValueError(f"Invalid initialization method: {init_mode}. Choose from ['zero', 'rand', 'xavier', 'xavier_normal']")
+    
+    return zero_mlp
+
+
+def _add_orientation_mlp(
+    init_mode: str,
+    mlcv_dim: int,
+):
+    """
+    Create orientation conditioning MLP (2 rotation features + mlcv_dim → 3 axis-angle).
+    """
+    if init_mode == "zero":
+        zero_linear = nn.Linear(2 + mlcv_dim, 3)
+        nn.init.zeros_(zero_linear.weight)
+        nn.init.zeros_(zero_linear.bias)
+        zero_mlp = nn.Sequential(zero_linear)
+    elif init_mode == "rand":
+        zero_linear = nn.Linear(2 + mlcv_dim, 3)
+        nn.init.normal_(zero_linear.weight, mean=0.0, std=1e-4)
+        nn.init.zeros_(zero_linear.bias)
+        zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+    elif init_mode == "xavier":
+        zero_linear = nn.Linear(2 + mlcv_dim, 3)
+        nn.init.xavier_uniform_(zero_linear.weight)
+        nn.init.zeros_(zero_linear.bias)
+        zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+    elif init_mode == "xavier_normal":
+        zero_linear = nn.Linear(2 + mlcv_dim, 3)
+        nn.init.xavier_normal_(zero_linear.weight)
+        nn.init.zeros_(zero_linear.bias)
+        zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
+    else:
+        raise ValueError(f"Invalid initialization method: {init_mode}. Choose from ['zero', 'rand', 'xavier', 'xavier_normal']")
     
     return zero_mlp
 
@@ -588,9 +642,8 @@ def main(cfg):
         score_model.model_nn.add_module(f"zero_conv_mlp_pos", zero_mlp_pos)
         zero_conv_mlp_pos = score_model.model_nn.get_submodule("zero_conv_mlp_pos")
         
-        zero_mlp_orient = _add_zero_conv_mlp(
+        zero_mlp_orient = _add_orientation_mlp(
             init_mode=cfg.model.score_model.init,
-            hidden_dim=hidden_dim,
             mlcv_dim=cfg.model.mlcv_model.mlcv_dim,
         )
         zero_mlp_orient.train()
@@ -716,6 +769,11 @@ def main(cfg):
     for epoch in pbar:
         total_loss = 0
         current_structure_metrics = {}  # Initialize structure metrics for this epoch
+        
+        # Loss spike debugging
+        batch_losses = []
+        batch_mlcv_stats = []
+        batch_structure_stats = []
 
         if epoch > cfg.model.score_model.last_training * num_epochs:
             score_model.train()
@@ -819,6 +877,34 @@ def main(cfg):
             )
             total_loss = total_loss + loss
             
+            # =================================================================
+            # LOSS SPIKE DEBUGGING: Track individual batch characteristics
+            # =================================================================
+            batch_loss_item = loss.item()
+            batch_losses.append(batch_loss_item)
+            
+            # Track MLCV characteristics for this batch
+            mlcv_stats = {
+                'mean': mlcv.mean().item(),
+                'std': mlcv.std().item(),
+                'min': mlcv.min().item(),
+                'max': mlcv.max().item(),
+                'has_nan': torch.isnan(mlcv).any().item(),
+                'has_inf': torch.isinf(mlcv).any().item(),
+            }
+            batch_mlcv_stats.append(mlcv_stats)
+            
+            # Track structure quality for this batch
+            if structure_metrics:
+                structure_stats = {
+                    'ca_mean': structure_metrics.get('ca_sequential_dist_mean', 0),
+                    'ca_violations': structure_metrics.get('ca_sequential_dist_violations', 0),
+                    'cn_violations': structure_metrics.get('cn_bond_violations', 0),
+                }
+                batch_structure_stats.append(structure_stats)
+            else:
+                batch_structure_stats.append({'ca_mean': 0, 'ca_violations': 0, 'cn_violations': 0})
+            
             # Collect structure metrics for batch-level logging
             if batch_idx == 0:  # Store metrics from first batch for logging
                 current_structure_metrics = structure_metrics
@@ -891,12 +977,101 @@ def main(cfg):
         scheduler.step()
         pbar.set_description(f"Loss: {total_loss/num_batches:.6f}")
         
+        # =================================================================
+        # LOSS SPIKE ANALYSIS
+        # =================================================================
+        epoch_avg_loss = total_loss/num_batches
+        batch_losses_tensor = torch.tensor(batch_losses)
+        
+        # Compute loss distribution statistics
+        loss_mean = batch_losses_tensor.mean().item()
+        loss_std = batch_losses_tensor.std().item()
+        loss_median = batch_losses_tensor.median().item()
+        loss_min = batch_losses_tensor.min().item()
+        loss_max = batch_losses_tensor.max().item()
+        loss_range = loss_max - loss_min
+        
+        # Detect spikes (losses significantly above mean)
+        spike_threshold = loss_mean + 2 * loss_std  # 2 sigma rule
+        spike_mask = batch_losses_tensor > spike_threshold
+        num_spikes = spike_mask.sum().item()
+        spike_rate = num_spikes / len(batch_losses)
+        
+        # Identify extreme outliers (> 3 sigma)
+        extreme_threshold = loss_mean + 3 * loss_std
+        extreme_mask = batch_losses_tensor > extreme_threshold
+        num_extreme = extreme_mask.sum().item()
+        
         # Prepare logging data
         log_data = {
-            "loss": total_loss/num_batches,
+            "loss": epoch_avg_loss,
             "lr": optimizer.param_groups[0]['lr'],
             "epoch": epoch,
+            # Loss distribution metrics
+            "loss_analysis/mean": loss_mean,
+            "loss_analysis/std": loss_std,
+            "loss_analysis/median": loss_median,
+            "loss_analysis/min": loss_min,
+            "loss_analysis/max": loss_max,
+            "loss_analysis/range": loss_range,
+            "loss_analysis/spike_rate": spike_rate,
+            "loss_analysis/num_spikes": num_spikes,
+            "loss_analysis/num_extreme": num_extreme,
+            "loss_analysis/coefficient_of_variation": loss_std / loss_mean if loss_mean > 0 else 0,
         }
+        
+        # Analyze characteristics of spike batches
+        if num_spikes > 0:
+            spike_indices = torch.where(spike_mask)[0].tolist()
+            
+            # MLCV characteristics of spike batches
+            spike_mlcv_means = [batch_mlcv_stats[i]['mean'] for i in spike_indices]
+            spike_mlcv_stds = [batch_mlcv_stats[i]['std'] for i in spike_indices]
+            spike_mlcv_nans = [batch_mlcv_stats[i]['has_nan'] for i in spike_indices]
+            spike_mlcv_infs = [batch_mlcv_stats[i]['has_inf'] for i in spike_indices]
+            
+            # Structure characteristics of spike batches
+            spike_ca_means = [batch_structure_stats[i]['ca_mean'] for i in spike_indices]
+            spike_ca_violations = [batch_structure_stats[i]['ca_violations'] for i in spike_indices]
+            
+            log_data.update({
+                "spike_analysis/mlcv_mean_avg": sum(spike_mlcv_means) / len(spike_mlcv_means),
+                "spike_analysis/mlcv_std_avg": sum(spike_mlcv_stds) / len(spike_mlcv_stds),
+                "spike_analysis/mlcv_nan_rate": sum(spike_mlcv_nans) / len(spike_mlcv_nans),
+                "spike_analysis/mlcv_inf_rate": sum(spike_mlcv_infs) / len(spike_mlcv_infs),
+                "spike_analysis/ca_mean_avg": sum(spike_ca_means) / len(spike_ca_means) if spike_ca_means else 0,
+                "spike_analysis/ca_violations_avg": sum(spike_ca_violations) / len(spike_ca_violations) if spike_ca_violations else 0,
+            })
+            
+            # Print detailed spike analysis
+            if cfg.log.debug or spike_rate > 0.1:  # Always show if >10% spikes
+                print(f"\n=== LOSS SPIKE ANALYSIS (Epoch {epoch}) ===")
+                print(f"Epoch average loss: {epoch_avg_loss:.6f}")
+                print(f"Loss distribution: mean={loss_mean:.6f}, std={loss_std:.6f}, median={loss_median:.6f}")
+                print(f"Loss range: [{loss_min:.6f}, {loss_max:.6f}] (range={loss_range:.6f})")
+                print(f"Spike detection: {num_spikes}/{len(batch_losses)} batches ({spike_rate:.1%}) above {spike_threshold:.6f}")
+                print(f"Extreme outliers: {num_extreme} batches above {extreme_threshold:.6f}")
+                
+                if num_spikes > 0:
+                    print(f"Spike batch characteristics:")
+                    print(f"  - MLCV mean: {log_data['spike_analysis/mlcv_mean_avg']:.6f}")
+                    print(f"  - MLCV std: {log_data['spike_analysis/mlcv_std_avg']:.6f}")
+                    print(f"  - MLCV NaN rate: {log_data['spike_analysis/mlcv_nan_rate']:.1%}")
+                    print(f"  - MLCV Inf rate: {log_data['spike_analysis/mlcv_inf_rate']:.1%}")
+                    print(f"  - CA distance mean: {log_data['spike_analysis/ca_mean_avg']:.6f}")
+                    print(f"  - CA violations: {log_data['spike_analysis/ca_violations_avg']:.1%}")
+                    
+                    # Show worst spike details
+                    worst_idx = spike_indices[torch.argmax(batch_losses_tensor[spike_mask])]
+                    print(f"Worst spike (batch {worst_idx}): loss={batch_losses[worst_idx]:.6f}")
+                    print(f"  - MLCV: mean={batch_mlcv_stats[worst_idx]['mean']:.6f}, "
+                          f"std={batch_mlcv_stats[worst_idx]['std']:.6f}, "
+                          f"range=[{batch_mlcv_stats[worst_idx]['min']:.6f}, {batch_mlcv_stats[worst_idx]['max']:.6f}]")
+                    print(f"  - Structure: CA={batch_structure_stats[worst_idx]['ca_mean']:.6f}, "
+                          f"violations={batch_structure_stats[worst_idx]['ca_violations']:.1%}")
+                print(f"=== END SPIKE ANALYSIS ===\n")
+        
+        # =================================================================
         
         # Add structure quality metrics if available
         if 'current_structure_metrics' in locals() and current_structure_metrics:

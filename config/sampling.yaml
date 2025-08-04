@@ -1,0 +1,5 @@
+defaults:
+- data: basic
+- log: basic
+- model: input
+- sample: basic
