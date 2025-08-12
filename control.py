@@ -162,55 +162,166 @@ def kabsch_rmsd(
     return rmsd
 
 
-# def unphysical_loss(
-#     x0_pos: torch.Tensor,
-#     max_ca_seq_distance: float = 4.5,
-#     max_cn_seq_distance: float = 2.0,
-#     clash_distance: float = 1.0,
-# ) -> torch.Tensor:
-#     # pdb_path = "/home/shpark/prj-mlcv/lib/bioemu/topology-backbone.pdb"
-#     # with open(pdb_path, "r") as f:
-#     #     pdb_lines = f.readlines()
-#     # traj = md.load_pdb(pdb_path)
-#     # traj.xyz = x0_pos.clone().cpu().detach().numpy()
+def coord2rot(
+    pdb,
+    coordinates: torch.Tensor,
+):
+    """
+    Computes a rotation matrix Q from C_alpha, N, and C atom coordinates
+    using the Gram-Schmidt algorithm.
 
-#     # ca_indices = [4, 25, 46, 60, 72, 87, 101, 108, 122, 146]
-#     # c_indices = [5, 26, 47, 61, 73, 88, 102, 109, 123, 147]
-#     # n_indices = [6, 27, 48, 62, 74, 89, 103, 110, 124, 148]
-#     # max_ca_seq_distance = 1.54
-#     # max_cn_seq_distance = 1.33
-#     # clash_distance = 1.9
+    Args:
+        a (torch.Tensor): Tensor of C_alpha atom coordinates with shape (10, 3).
+        b (torch.Tensor): Tensor of N atom coordinates with shape (10, 3).
+        c (torch.Tensor): Tensor of C atom coordinates with shape (10, 3).
+
+    Returns:
+        torch.Tensor: A rotation matrix Q with shape (10, 3, 3) where each 
+                      (3, 3) matrix is in SO(3).
+    """
+    ca_indices = pdb.topology.select('name CA')
+    n_indices = pdb.topology.select('name N')
+    c_indices = pdb.topology.select('name C')
+    pdb_xyz = torch.tensor(pdb.xyz[0])
+
+    a = pdb_xyz[ca_indices]
+    b = pdb_xyz[n_indices]
+    c = pdb_xyz[c_indices]
+
+    # Get displacement vectors
+    u = b - a  # C_alpha -> N
+    v = c - a  # C_alpha -> C
+
+    # Gram-Schmidt Process
+    # First basis vector
+    e1 = u / torch.norm(u, dim=-1, keepdim=True)
+
+    # Second basis vector
+    u2 = v - torch.sum(e1 * v, dim=-1, keepdim=True) * e1
+    e2 = u2 / torch.norm(u2, dim=-1, keepdim=True)
+
+    # Third basis vector (cross product of e1 and e2)
+    e3 = torch.cross(e1, e2, dim=-1)
+
+    # Construct the rotation matrix Q
+    # Stack the orthonormal basis vectors to form the columns of Q
+    Q = torch.stack([e1, e2, e3], dim=-1)
+
+    # To ensure the determinant is +1 (SO(3)), we need to check the orientation.
+    # The Gram-Schmidt process doesn't guarantee a right-handed system, 
+    # but the image description implies one. The cross-product implicitly
+    # handles this by creating a vector orthogonal to the plane of e1 and e2.
+    # The resulting matrix will have a determinant of +1 or -1. 
+    # For a right-handed basis, the determinant is +1.
     
-#     n = x0_pos.shape[0]
-#     diffs = x0_pos.unsqueeze(1) - x0_pos.unsqueeze(0)  # shape: (n, n, 3)
-#     dists = torch.norm(diffs, dim=-1)  # shape: (n, n
-#     mask = ~torch.eye(n, dtype=torch.bool, device=x0_pos.device)
-#     contact_loss = torch.nn.functional.relu(dists - max_ca_seq_distance)
-#     loss_ca = contact_loss[mask].pow(2).mean()
+    # We can explicitly check and correct if needed, but the cross product 
+    # as used here for the third vector gives a right-handed system by definition.
+    # Therefore, the determinant will be +1, and the resulting matrix Q
+    # is a valid rotation matrix in SO(3).
 
-#     # # C-N peptide bond distance
-#     # cn_dists = torch.norm(
-#     #     xyz[:, c_indices] - xyz[:, n_indices], dim=-1
-#     # )
-#     # loss_cn = torch.nn.functional.relu(cn_dists - max_cn_seq_distance).pow(2).mean()
-#     loss_cn = 0
+    return Q
 
-#     # # Clash penalty
-#     # # Compute full distance matrix (B, N, N)
-#     # diff = xyz[:, :, None, :] - xyz[:, None, :, :]
-#     # dists = torch.norm(diff, dim=-1)
-
-#     # # Mask out intra-residue distances
-#     # same_res = torch.eye(xyz.shape[0], dtype=torch.bool, device = device)
-#     # clash_mask = torch.logical_not(same_res).to(device)
-
-#     # # Apply clash penalty
-#     # clash_penalty = torch.nn.functional.relu(clash_distance - dists)
-#     # clash_penalty = clash_penalty * clash_mask  # ignore same-residue
-#     # loss_clash = clash_penalty.pow(2).mean()
-#     loss_clash = 0
+def calc_standard_denoising_loss(
+    score_model: torch.nn.Module,
+    mlcv: torch.Tensor,
+    target: torch.Tensor,
+    orientation: torch.Tensor,
+    sdes: dict[str, SDE],
+    batch: list[ChemGraph],
+    cfg: OmegaConf = None,
+    condition_mode: str = "none",
+    min_t: float = 1e-4,
+    max_t: float = 0.99,
+) -> tuple[torch.Tensor, dict]:
+    """
+    Classic denoising score-matching loss for fine-tuning with time-lagged data.
     
-#     return loss_ca, loss_cn, loss_clash
+    This implements the standard denoising diffusion training objective for both
+    positions and orientations:
+    L = E_t,x0,ε [ ||s_θ(x_t, t) - ∇_{x_t} log p(x_t | x_0)||² ]
+    
+    For positions (Gaussian forward process):
+    - x_t = α_t x_0 + σ_t ε, where ε ~ N(0, I)
+    - ∇_{x_t} log p(x_t | x_0) = -(x_t - α_t x_0) / σ_t²
+    
+    For orientations (SO3 diffusion):
+    - R_t ~ IGSO3(R_0, σ_t), where σ_t is the marginal std at time t
+    - ∇_{R_t} log p(R_t | R_0) computed using SO3SDE.compute_score()
+    
+    Args:
+        score_model: The score network to fine-tune
+        mlcv: MLCV conditioning information (if using conditional model)
+        target: Time-lagged target positions (x_0 in the diffusion notation)
+        sdes: Dictionary of SDEs for the forward process
+        batch: List of ChemGraph templates
+        cfg: Configuration
+        condition_mode: How to condition on MLCV
+        min_t: Minimum timestep to sample
+        max_t: Maximum timestep to sample
+    
+    Returns:
+        Tuple of (loss, metrics_dict)
+    """
+    device = batch[0].pos.device
+    batch_size = len(batch)
+    target = target.to(device)
+    clean_graphs: list[ChemGraph] = []
+    
+    if cfg.data.representation == "cad-pos":
+        # Target contains all atom positions, we need CA only
+        pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/{cfg.data.system_id}/{cfg.data.system_id}_from_mae.pdb")
+        ca_indices = pdb.topology.select('name CA')
+        
+        for i, template_graph in enumerate(batch):
+            clean_pos = target[i, ca_indices].to(device)            
+            # DEBUGGING: Set orientations to identity matrix to isolate position learning
+            clean_orientations = orientation[i].to(device)
+            # clean_orientations = torch.eye(3, device=device).unsqueeze(0).repeat(clean_pos.shape[0], 1, 1)
+            clean_graphs.append(template_graph.replace(
+                pos=clean_pos,
+                node_orientations=clean_orientations,
+            ))
+    else:
+        raise ValueError(f"Representation {cfg.data.representation} not supported")
+    
+    clean_batch = Batch.from_data_list(clean_graphs)
+    # t = torch.rand(batch_size, device=device) * (max_t - min_t) + min_t
+    t = torch.randint(1, 100, (batch_size,), device=device) / 100.0
+    alpha_t, sigma_t = sdes["pos"].mean_coeff_and_std(
+        x=clean_batch.pos,
+        t=t,
+        batch_idx=clean_batch.batch,
+    )
+    
+    # Sample Gaussian noise for positions
+    noise = torch.randn_like(clean_batch.pos)
+    x_t = alpha_t * clean_batch.pos + sigma_t * noise
+    noisy_batch = clean_batch.replace(
+        pos=x_t,
+    )
+    
+    # Predict score using the model
+    predicted = get_score(
+        batch=noisy_batch,
+        sdes=sdes,
+        score_model=score_model,
+        t=t,
+        mlcv=mlcv,
+    )
+    
+    # Compute target scores for positions
+    pos_target_score = -(x_t - alpha_t * clean_batch.pos) / (sigma_t ** 2)
+    pos_loss = torch.nn.functional.mse_loss(predicted["pos"], pos_target_score)    
+    total_loss = pos_loss
+    
+    metrics = {
+        "pos_loss": pos_loss.item(),
+        "timestep_mean": t.mean().item(),
+        "timestep_std": t.std().item(),
+        "total_loss": total_loss.item(),
+    }
+    
+    return total_loss, metrics
 
 
 # NOTE: Fine-tuning in ppft matter
@@ -275,7 +386,7 @@ def calc_tlc_loss(
     
     try:
         # Load reference structure to get atom indices
-        pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres_backbone.pdb")
+        pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/{cfg.data.system_id}/{cfg.data.system_id}_from_mae.pdb")
         ca_indices = pdb.topology.select('name CA')
         c_indices = pdb.topology.select('name C')
         n_indices = pdb.topology.select('name N')
@@ -358,7 +469,7 @@ def calc_tlc_loss(
     # =================================================================
     
     if cfg.data.representation == "cad":
-        generated_ca_distance = torch.empty(num_systems_sampled, n_replications, 45, device=device)
+        generated_ca_distance = torch.empty(num_systems_sampled, n_replications, cfg.data.input_dim, device=device)
         for idx in range(num_systems_sampled):
             for rep in range(n_replications):
                 sample_idx = idx + rep * num_systems_sampled
@@ -371,7 +482,7 @@ def calc_tlc_loss(
         loss = torch.nn.functional.mse_loss(generated_ca_distance_mean, target)
     
     elif cfg.data.representation == "cad-pos":
-        pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/CLN025_desres_backbone.pdb")
+        pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/{cfg.data.system_id}/{cfg.data.system_id}_from_mae.pdb")
         ca_indices = pdb.topology.select('name CA')
         
         loss = torch.tensor(0.0, device=device)
@@ -435,7 +546,7 @@ def _rollout(
         score_model=score_model,
         mlcv=mlcv,
         condition_mode=condition_mode,
-        record_grad_steps=record_grad_steps,  # Enable gradients for all steps
+        record_grad_steps=record_grad_steps,
         cfg=cfg,
     )
 
@@ -443,7 +554,11 @@ def _rollout(
     # This step is always with gradient.
     mid_t_expanded = torch.full((batch_size,), mid_t, device=device)
     score_mid_t = get_score(
-        batch=x_mid, sdes=sdes, t=mid_t_expanded, score_model=score_model, mlcv=mlcv,
+        batch=x_mid,
+        sdes=sdes,
+        t=mid_t_expanded,
+        score_model=score_model,
+        mlcv=mlcv,
     )["pos"]
 
     # No need to compute orientations, because they are not used to compute foldedness.
@@ -547,6 +662,46 @@ def _add_orientation_mlp(
     return zero_mlp
 
 
+def clip_loss(
+    loss: torch.Tensor, 
+    max_loss_value: float = 100.0, 
+    min_loss_value: float = 0.0,
+    enable_clipping: bool = True,
+    debug: bool = False
+) -> tuple[torch.Tensor, bool]:
+    """
+    Clip loss values to prevent training instability from extreme losses.
+    
+    Args:
+        loss: The loss tensor to clip
+        max_loss_value: Maximum allowed loss value
+        min_loss_value: Minimum allowed loss value (should be >= 0 for most losses)
+        enable_clipping: Whether to actually perform clipping
+        debug: Whether to print debug information
+    
+    Returns:
+        Tuple of (clipped_loss, was_clipped)
+    """
+    if not enable_clipping:
+        return loss, False
+    
+    original_loss = loss.item()
+    was_clipped = False
+    
+    if loss > max_loss_value:
+        loss = torch.tensor(max_loss_value, device=loss.device, dtype=loss.dtype, requires_grad=True)
+        was_clipped = True
+        if debug:
+            print(f"⚠️  Loss clipped from {original_loss:.6f} to {max_loss_value:.6f} (max clipping)")
+    elif loss < min_loss_value:
+        loss = torch.tensor(min_loss_value, device=loss.device, dtype=loss.dtype, requires_grad=True)
+        was_clipped = True
+        if debug:
+            print(f"⚠️  Loss clipped from {original_loss:.6f} to {min_loss_value:.6f} (min clipping)")
+    
+    return loss, was_clipped
+
+
 @hydra.main(
     version_base=None,
     config_path="config",
@@ -593,7 +748,18 @@ def main(cfg):
     )
     score_model: DiGConditionalScoreModel = hydra.utils.instantiate(model_config["score_model"])
     score_model.load_state_dict(model_state)
+    score_model = score_model.to(device)  # CRITICAL FIX: Move score model to device
+    
     sdes: dict[str, SDE] = hydra.utils.instantiate(model_config["sdes"])
+    for sde_name, sde in sdes.items():
+        if hasattr(sde, 'to'):
+            sde.to(device)
+        # For SO3SDE, ensure internal components are on device
+        if hasattr(sde, 'score_function') and hasattr(sde.score_function, 'to'):
+            sde.score_function.to(device)
+        if hasattr(sde, 'igso3') and hasattr(sde.igso3, 'to'):
+            sde.igso3.to(device)
+    
     if cfg.model.score_model.mode == "train":
         score_model.train()
     elif cfg.model.score_model.mode == "eval":
@@ -621,6 +787,7 @@ def main(cfg):
         score_model.model_nn.add_module(f"zero_conv_mlp", zero_mlp)
         zero_conv_mlp = score_model.model_nn.get_submodule("zero_conv_mlp")
         zero_conv_mlp.train()
+        zero_conv_mlp.to(device)
         
     elif cfg.model.mlcv_model.condition_mode == "input-control":
         for i in range(8):
@@ -631,7 +798,8 @@ def main(cfg):
             )
             zero_mlp.train()
             score_model.model_nn.st_module.encoder.add_module(f"zero_conv_mlp_{i}", zero_mlp)
-    
+            zero_mlp.to(device)
+            
     elif cfg.model.mlcv_model.condition_mode == "backbone-both":
         zero_mlp_pos = _add_zero_conv_mlp(
             init_mode=cfg.model.score_model.init,
@@ -641,6 +809,7 @@ def main(cfg):
         zero_mlp_pos.train()
         score_model.model_nn.add_module(f"zero_conv_mlp_pos", zero_mlp_pos)
         zero_conv_mlp_pos = score_model.model_nn.get_submodule("zero_conv_mlp_pos")
+        zero_conv_mlp_pos.to(device)
         
         zero_mlp_orient = _add_orientation_mlp(
             init_mode=cfg.model.score_model.init,
@@ -649,6 +818,8 @@ def main(cfg):
         zero_mlp_orient.train()
         score_model.model_nn.add_module(f"zero_conv_mlp_orient", zero_mlp_orient)
         zero_conv_mlp_orient = score_model.model_nn.get_submodule("zero_conv_mlp_orient")
+        zero_conv_mlp_orient.to(device)
+        
     for p in score_model.parameters():
         p.requires_grad = True
     
@@ -683,6 +854,7 @@ def main(cfg):
     method = cfg.model.mlcv_model.name
     if method == "ours":
         mlcv_model = load_ours(
+            input_dim=cfg.data.input_dim,
             mlcv_dim=cfg.model.mlcv_model.mlcv_dim,
             dim_normalization=cfg.model.mlcv_model.dim_normalization,
             normalization_factor=cfg.model.mlcv_model.normalization_factor,
@@ -761,14 +933,42 @@ def main(cfg):
     num_batches = len(dataloader)
 
     # NOTE: Training loop
+    training_method = getattr(cfg.model.training, 'method', 'ppft')
+    enable_loss_clipping = getattr(cfg.model.training, 'enable_loss_clipping', True)
+    max_loss_value = getattr(cfg.model.training, 'max_loss_value', 100.0)
+    min_loss_value = getattr(cfg.model.training, 'min_loss_value', 0.0)
+    print(f"\n=== TRAINING CONFIGURATION ===")
+    print(f"Training method: {training_method}")
+    if training_method == 'standard':
+        print(f"  - Using efficient standard denoising fine-tuning")
+        print(f"  - No rollouts required (much faster)")
+    elif training_method == 'ppft':
+        print(f"  - Using PPFT method (expensive rollouts)")
+        print(f"  - Mid timestep: {mid_t}")
+        print(f"  - Rollout steps: {N_rollout}")
+        print(f"  - This will be slower but provides structure metrics")
+    else:
+        raise ValueError(f"Unknown training method: {training_method}. Choose from ['standard', 'ppft']")
+    print(f"Loss clipping: {'enabled' if enable_loss_clipping else 'disabled'}")
+    if enable_loss_clipping:
+        print(f"  - Max loss value: {max_loss_value}")
+        print(f"  - Min loss value: {min_loss_value}")
+        print(f"  - Purpose: Prevent training instability from extreme losses")
+    print(f"==============================\n")
+    
     pbar = tqdm(
         range(num_epochs),
         desc=f"Loss: x.xxxxxx",
         total=num_epochs,
     )
+    spike_rate_history = []
+    total_clips = 0
+    clips_per_epoch = []
+    
     for epoch in pbar:
         total_loss = 0
         current_structure_metrics = {}  # Initialize structure metrics for this epoch
+        epoch_clips = 0  # Track clipping events this epoch
         
         # Loss spike debugging
         batch_losses = []
@@ -796,92 +996,66 @@ def main(cfg):
             optimizer.zero_grad()
             current_data = batch["current_data"]
             timelagged_data = batch["timelagged_data"]
+            current_orientation = batch["current_orientation"]
+            timelagged_orientation = batch["timelagged_orientation"]
             mlcv = mlcv_model(current_data)
             
-            if cfg.log.debug_mlcv and batch_idx == 0:  # Only debug first batch to avoid spam
-                print(f"=== CONDITIONING EFFECT DEBUG ===")
-                print(f"MLCV values: {mlcv.flatten()[:10].detach().cpu().numpy()}")
+            if training_method == 'standard':
+                loss, loss_metrics = calc_standard_denoising_loss(
+                    score_model=score_model,
+                    mlcv=mlcv,
+                    target=timelagged_data,
+                    sdes=sdes,
+                    orientation=timelagged_orientation,
+                    batch=[chemgraph] * current_data.shape[0],
+                    cfg=cfg,
+                    condition_mode=cfg.model.mlcv_model.condition_mode,
+                    min_t=getattr(cfg.model.training, 'min_t', 1e-4),
+                    max_t=getattr(cfg.model.training, 'max_t', 0.99),
+                )
+                structure_metrics = {}  # No structure metrics for standard denoising
                 
-                # Test: Run the same input with and without MLCV to see if outputs differ
-                with torch.no_grad():
-                    loss_with_mlcv, _ = calc_tlc_loss(
-                        score_model=score_model,
-                        mlcv=mlcv,
-                        target=timelagged_data,
-                        sdes=sdes,
-                        batch=[chemgraph] * current_data.shape[0],
-                        n_replications=1,
-                        mid_t=mid_t,
-                        N_rollout=N_rollout,
-                        record_grad_steps=record_grad_steps,
-                        condition_mode=cfg.model.mlcv_model.condition_mode,
-                        cfg=cfg,
-                    )
-                    
-                    # Create zero MLCV for comparison
-                    mlcv_zero = torch.zeros_like(mlcv)
-                    loss_without_mlcv, _ = calc_tlc_loss(
-                        score_model=score_model,
-                        mlcv=mlcv_zero,
-                        target=timelagged_data,
-                        sdes=sdes,
-                        batch=[chemgraph] * current_data.shape[0],
-                        n_replications=1,
-                        mid_t=mid_t,
-                        N_rollout=N_rollout,
-                        record_grad_steps=record_grad_steps,
-                        condition_mode=cfg.model.mlcv_model.condition_mode,
-                        cfg=cfg,
-                    )
-                    
-                    # Also test with random MLCV
-                    mlcv_random = torch.randn_like(mlcv) * 0.1
-                    loss_with_random_mlcv, _ = calc_tlc_loss(
-                        score_model=score_model,
-                        mlcv=mlcv_random,
-                        target=timelagged_data,
-                        sdes=sdes,
-                        batch=[chemgraph] * current_data.shape[0],
-                        n_replications=1,
-                        mid_t=mid_t,
-                        N_rollout=N_rollout,
-                        record_grad_steps=record_grad_steps,
-                        condition_mode=cfg.model.mlcv_model.condition_mode,
-                        cfg=cfg,
-                    )
-                    
-                print(f"Loss with real MLCV:   {loss_with_mlcv.item():.6f}")
-                print(f"Loss with zero MLCV:   {loss_without_mlcv.item():.6f}")
-                print(f"Loss with random MLCV: {loss_with_random_mlcv.item():.6f}")
-                print(f"Real vs Zero effect:   {abs(loss_with_mlcv.item() - loss_without_mlcv.item()):.6f}")
-                print(f"Real vs Random effect: {abs(loss_with_mlcv.item() - loss_with_random_mlcv.item()):.6f}")
+            elif training_method == 'ppft':
+                loss, structure_metrics = calc_tlc_loss(
+                    score_model=score_model,
+                    mlcv=mlcv,
+                    target=timelagged_data,
+                    sdes=sdes,
+                    batch=[chemgraph] * current_data.shape[0],
+                    n_replications=1,
+                    mid_t=mid_t,
+                    N_rollout=N_rollout,
+                    record_grad_steps=record_grad_steps,
+                    condition_mode=cfg.model.mlcv_model.condition_mode,
+                    cfg=cfg,
+                )
+                loss_metrics = {}  # No additional loss metrics for PPFT
                 
-                if abs(loss_with_mlcv.item() - loss_without_mlcv.item()) < 1e-6:
-                    print("❌ CRITICAL: Conditioning has NO effect on loss!")
-                else:
-                    print("✅ Conditioning affects loss (good!)")
-                print(f"=== END DEBUG ===")
-
-            loss, structure_metrics = calc_tlc_loss(
-                score_model=score_model,
-                mlcv=mlcv,
-                target=timelagged_data,
-                sdes=sdes,
-                batch=[chemgraph] * current_data.shape[0],
-                n_replications=1,
-                mid_t=mid_t,
-                N_rollout=N_rollout,
-                record_grad_steps=record_grad_steps,
-                condition_mode=cfg.model.mlcv_model.condition_mode,
-                cfg=cfg,
-            )
-            total_loss = total_loss + loss
+            else:
+                raise ValueError(f"Unknown training method: {training_method}. Choose from ['standard', 'ppft']")
             
-            # =================================================================
-            # LOSS SPIKE DEBUGGING: Track individual batch characteristics
-            # =================================================================
-            batch_loss_item = loss.item()
-            batch_losses.append(batch_loss_item)
+            # Apply loss clipping to prevent training instability
+            original_loss_value = loss.item()
+            loss, was_clipped = clip_loss(
+                loss=loss,
+                max_loss_value=max_loss_value,
+                min_loss_value=min_loss_value,
+                enable_clipping=enable_loss_clipping,
+                debug=cfg.log.debug
+            )
+            
+            # Track clipping statistics
+            if was_clipped:
+                epoch_clips += 1
+                total_clips += 1
+                if cfg.log.debug:
+                    print(f"📌 Batch {batch_idx}: Loss clipped from {original_loss_value:.6f} to {loss.item():.6f}")
+            
+            # Add method-specific metrics to the loss for logging
+            if loss_metrics:
+                # Store these for logging later
+                current_loss_metrics = loss_metrics
+            total_loss = total_loss + loss
             
             # Track MLCV characteristics for this batch
             mlcv_stats = {
@@ -927,164 +1101,37 @@ def main(cfg):
                 print(f"Gradient norm BEFORE clipping: {total_norm_before:.2e} (max: {max_grad:.2e}, min: {min_grad:.2e})")
             
             # Add gradient clipping to prevent vanishing/exploding gradients
-            if hasattr(cfg.model.training, 'gradient_clip_val') and cfg.model.training.gradient_clip_val > 0:
+            if cfg.model.training.gradient_clip:
                 clip_val = cfg.model.training.gradient_clip_val
-            else:
-                clip_val = 1.0  # Default clip value
+                clipped_norm = torch.nn.utils.clip_grad_norm_(watch_param_list, max_norm=clip_val)
             
-            # Clip gradients for all parameters being optimized
-            clipped_norm = torch.nn.utils.clip_grad_norm_(watch_param_list, max_norm=clip_val)
-            
-            # Debug: Check gradient clipping results
-            if cfg.log.debug and batch_idx == 0:
-                print(f"Gradient clip results: total_norm={clipped_norm:.2e}, clip_val={clip_val}")
-                if clipped_norm > clip_val:
-                    print(f"⚠️  Gradients were clipped! (norm {clipped_norm:.2e} > {clip_val})")
-                else:
-                    print(f"✓ Gradients within bounds (no clipping needed)")
-            
-            # Optional gradient flow debugging (add debug flag to config to enable)
-            if cfg.log.debug:
-                zero_conv_modules = []
-                if cfg.model.mlcv_model.condition_mode == "backbone-both":
-                    zero_conv_modules.extend([zero_conv_mlp_pos, zero_conv_mlp_orient])
-                elif cfg.model.mlcv_model.condition_mode == "input-control":
-                    for i in range(8):
-                        zero_conv_modules.append(score_model.model_nn.st_module.encoder.get_submodule(f"zero_conv_mlp_{i}"))
-                elif cfg.model.mlcv_model.condition_mode in ["input", "latent", "backbone"]:
-                    zero_conv_modules.append(zero_conv_mlp)
-                
-                for i, module in enumerate(zero_conv_modules):
-                    # Check gradients more carefully
-                    grad_info = []
-                    for name, param in module.named_parameters():
-                        if param.grad is not None:
-                            grad_norm = param.grad.norm().item()
-                            grad_max = param.grad.abs().max().item()
-                            grad_info.append(f"{name}: norm={grad_norm:.2e}, max={grad_max:.2e}")
-                        else:
-                            grad_info.append(f"{name}: grad=None")
-                    
-                    print(f"Zero conv module {i} detailed gradients: {grad_info}")
-                    has_meaningful_grad = any(p.grad is not None and p.grad.abs().sum() > 1e-8 for p in module.parameters())
-                    if not has_meaningful_grad:
-                        print(f"WARNING: Zero conv module {i} has no meaningful gradients!")
+                if cfg.log.debug and batch_idx == 0:
+                    print(f"Gradient clip results: total_norm={clipped_norm:.2e}, clip_val={clip_val}")
+                    if clipped_norm > clip_val and clip_val > 0:
+                        print(f"⚠️  Gradients were clipped! (norm {clipped_norm:.2e} > {clip_val})")
                     else:
-                        print(f"✓ Zero conv module {i} has gradients!")
-                
+                        print(f"✓ Gradients within bounds (no clipping needed)")
+                    
             optimizer.step()
         
         scheduler.step()
         pbar.set_description(f"Loss: {total_loss/num_batches:.6f}")
         
-        # =================================================================
-        # LOSS SPIKE ANALYSIS
-        # =================================================================
-        epoch_avg_loss = total_loss/num_batches
-        batch_losses_tensor = torch.tensor(batch_losses)
-        
-        # Compute loss distribution statistics
-        loss_mean = batch_losses_tensor.mean().item()
-        loss_std = batch_losses_tensor.std().item()
-        loss_median = batch_losses_tensor.median().item()
-        loss_min = batch_losses_tensor.min().item()
-        loss_max = batch_losses_tensor.max().item()
-        loss_range = loss_max - loss_min
-        
-        # Detect spikes (losses significantly above mean)
-        spike_threshold = loss_mean + 2 * loss_std  # 2 sigma rule
-        spike_mask = batch_losses_tensor > spike_threshold
-        num_spikes = spike_mask.sum().item()
-        spike_rate = num_spikes / len(batch_losses)
-        
-        # Identify extreme outliers (> 3 sigma)
-        extreme_threshold = loss_mean + 3 * loss_std
-        extreme_mask = batch_losses_tensor > extreme_threshold
-        num_extreme = extreme_mask.sum().item()
-        
         # Prepare logging data
         log_data = {
-            "loss": epoch_avg_loss,
+            "loss": total_loss/num_batches,
             "lr": optimizer.param_groups[0]['lr'],
             "epoch": epoch,
-            # Loss distribution metrics
-            "loss_analysis/mean": loss_mean,
-            "loss_analysis/std": loss_std,
-            "loss_analysis/median": loss_median,
-            "loss_analysis/min": loss_min,
-            "loss_analysis/max": loss_max,
-            "loss_analysis/range": loss_range,
-            "loss_analysis/spike_rate": spike_rate,
-            "loss_analysis/num_spikes": num_spikes,
-            "loss_analysis/num_extreme": num_extreme,
-            "loss_analysis/coefficient_of_variation": loss_std / loss_mean if loss_mean > 0 else 0,
         }
-        
-        # Analyze characteristics of spike batches
-        if num_spikes > 0:
-            spike_indices = torch.where(spike_mask)[0].tolist()
-            
-            # MLCV characteristics of spike batches
-            spike_mlcv_means = [batch_mlcv_stats[i]['mean'] for i in spike_indices]
-            spike_mlcv_stds = [batch_mlcv_stats[i]['std'] for i in spike_indices]
-            spike_mlcv_nans = [batch_mlcv_stats[i]['has_nan'] for i in spike_indices]
-            spike_mlcv_infs = [batch_mlcv_stats[i]['has_inf'] for i in spike_indices]
-            
-            # Structure characteristics of spike batches
-            spike_ca_means = [batch_structure_stats[i]['ca_mean'] for i in spike_indices]
-            spike_ca_violations = [batch_structure_stats[i]['ca_violations'] for i in spike_indices]
-            
-            log_data.update({
-                "spike_analysis/mlcv_mean_avg": sum(spike_mlcv_means) / len(spike_mlcv_means),
-                "spike_analysis/mlcv_std_avg": sum(spike_mlcv_stds) / len(spike_mlcv_stds),
-                "spike_analysis/mlcv_nan_rate": sum(spike_mlcv_nans) / len(spike_mlcv_nans),
-                "spike_analysis/mlcv_inf_rate": sum(spike_mlcv_infs) / len(spike_mlcv_infs),
-                "spike_analysis/ca_mean_avg": sum(spike_ca_means) / len(spike_ca_means) if spike_ca_means else 0,
-                "spike_analysis/ca_violations_avg": sum(spike_ca_violations) / len(spike_ca_violations) if spike_ca_violations else 0,
-            })
-            
-            # Print detailed spike analysis
-            if cfg.log.debug or spike_rate > 0.1:  # Always show if >10% spikes
-                print(f"\n=== LOSS SPIKE ANALYSIS (Epoch {epoch}) ===")
-                print(f"Epoch average loss: {epoch_avg_loss:.6f}")
-                print(f"Loss distribution: mean={loss_mean:.6f}, std={loss_std:.6f}, median={loss_median:.6f}")
-                print(f"Loss range: [{loss_min:.6f}, {loss_max:.6f}] (range={loss_range:.6f})")
-                print(f"Spike detection: {num_spikes}/{len(batch_losses)} batches ({spike_rate:.1%}) above {spike_threshold:.6f}")
-                print(f"Extreme outliers: {num_extreme} batches above {extreme_threshold:.6f}")
-                
-                if num_spikes > 0:
-                    print(f"Spike batch characteristics:")
-                    print(f"  - MLCV mean: {log_data['spike_analysis/mlcv_mean_avg']:.6f}")
-                    print(f"  - MLCV std: {log_data['spike_analysis/mlcv_std_avg']:.6f}")
-                    print(f"  - MLCV NaN rate: {log_data['spike_analysis/mlcv_nan_rate']:.1%}")
-                    print(f"  - MLCV Inf rate: {log_data['spike_analysis/mlcv_inf_rate']:.1%}")
-                    print(f"  - CA distance mean: {log_data['spike_analysis/ca_mean_avg']:.6f}")
-                    print(f"  - CA violations: {log_data['spike_analysis/ca_violations_avg']:.1%}")
-                    
-                    # Show worst spike details
-                    worst_idx = spike_indices[torch.argmax(batch_losses_tensor[spike_mask])]
-                    print(f"Worst spike (batch {worst_idx}): loss={batch_losses[worst_idx]:.6f}")
-                    print(f"  - MLCV: mean={batch_mlcv_stats[worst_idx]['mean']:.6f}, "
-                          f"std={batch_mlcv_stats[worst_idx]['std']:.6f}, "
-                          f"range=[{batch_mlcv_stats[worst_idx]['min']:.6f}, {batch_mlcv_stats[worst_idx]['max']:.6f}]")
-                    print(f"  - Structure: CA={batch_structure_stats[worst_idx]['ca_mean']:.6f}, "
-                          f"violations={batch_structure_stats[worst_idx]['ca_violations']:.1%}")
-                print(f"=== END SPIKE ANALYSIS ===\n")
-        
-        # =================================================================
-        
-        # Add structure quality metrics if available
         if 'current_structure_metrics' in locals() and current_structure_metrics:
             for key, value in current_structure_metrics.items():
                 log_data[f"structure/{key}"] = value
             
-            # Additional logging for structure quality monitoring
             if 'ca_sequential_dist_mean' in current_structure_metrics:
                 ca_mean = current_structure_metrics['ca_sequential_dist_mean']
                 ca_violations = current_structure_metrics.get('ca_sequential_dist_violations', 0)
                 log_data['structure/ca_health_score'] = max(0, 1 - ca_violations)  # Health score: 1 - violation_rate
                 log_data['structure/ca_realistic'] = 1 if 0.3 <= ca_mean <= 0.4 else 0  # 1 if CA distances are realistic
-        
         wandb.log(log_data, step=epoch)
         
         # Save checkpoint
@@ -1099,13 +1146,25 @@ def main(cfg):
             }
             torch.save(checkpoint, f"model/{cfg.log.date}/checkpoint_{epoch+1}.pt")
         
+    # Print loss clipping summary
+    total_batches = num_epochs * num_batches
+    overall_clip_rate = total_clips / total_batches if total_batches > 0 else 0
+    print(f"\n=== TRAINING SUMMARY ===")
+    print(f"Training completed: {num_epochs} epochs, {total_batches} total batches")
+    
     # Save final model weights
     torch.save({
         'mlcv_state_dict': mlcv_model.state_dict(),
         'model_state_dict': score_model.state_dict(),
         'condition_mode': cfg.model.mlcv_model.condition_mode,
         'mlcv_dim': cfg.model.mlcv_model.mlcv_dim,
-    }, f"model/{cfg.log.date}/final.pt")    
+        'loss_clipping_stats': {
+            'total_clips': total_clips,
+            'total_batches': total_batches,
+            'overall_clip_rate': overall_clip_rate,
+            'clips_per_epoch': clips_per_epoch,
+        }
+    }, f"model/{cfg.log.date}/final_model.pt")    
     torch.save({
         'mlcv_state_dict': mlcv_model.state_dict(),
     }, f"model/{cfg.log.date}/mlcv_model.pt")

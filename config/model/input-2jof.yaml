@@ -12,13 +12,14 @@ training:
   seed: 0
   num_epochs: 100
   batch_size: 128
-  learning_rate: 1e-12
+  learning_rate: 1e-8
   loss: cad_rmsd
+  gradient_clip: True
   gradient_clip_val: 1
   scheduler:
     name: CosineAnnealingWarmUpRestarts
     T_mult: 1
-    eta_max: 1e-6
+    eta_max: 1e-4
     warmup_epochs: 20
     gamma: 0.5
 rollout:

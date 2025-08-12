@@ -1,0 +1,60 @@
+# Example sweep configuration for multi-GPU parameter search
+# Usage: python control.py --config-name sweep_example --multirun
+
+defaults:
+  - data: CLN025-cad-pos
+  - log: basic
+  - model: input-score
+
+# Hydra multirun configuration
+hydra:
+  mode: MULTIRUN
+  sweep:
+    dir: outputs/sweeps/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra.job.name}
+  launcher:
+    _target_: hydra._internal.BasicLauncher
+    # For parallel execution, you can use joblib launcher:
+    # _target_: hydra_plugins.hydra_joblib_launcher.joblib_launcher.JoblibLauncher
+    # n_jobs: 4  # Number of parallel jobs (usually = number of GPUs)
+    # backend: threading
+  job:
+    chdir: true
+
+# Override log configuration for sweep
+log:
+  date: ${now:%m%d_%H%M%S}
+  tags: ['parameter_sweep', 'multirun']
+
+# Parameters to sweep over
+# Use comma-separated values for different options
+model:
+  mlcv_model:
+    # Test different MLCV dimensions
+    mlcv_dim: 1,2,4,8
+    # Test different conditioning modes
+    condition_mode: input,latent
+    # Test normalization options
+    dim_normalization: true,false
+    
+  training:
+    # Learning rate sweep
+    learning_rate: 1e-6,5e-6,1e-5,5e-5,1e-4
+    # Batch size sweep  
+    batch_size: 32,64,128
+    # Training method comparison
+    method: standard,ppft
+    # Epoch variations
+    num_epochs: 50,100
+    
+  rollout:
+    # Mid timestep variations (for PPFT method)
+    mid_t: 0.5,0.7,0.8
+    # Number of rollout steps
+    N_rollout: 3,5,7
+    
+  score_model:
+    # Initialization methods
+    init: zero,xavier_normal
+    # Training modes
+    mode: eval,train

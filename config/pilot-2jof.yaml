@@ -1,0 +1,4 @@
+defaults:
+- data: 2JOF
+- log: basic
+- model: input-2jof

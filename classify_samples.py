@@ -159,6 +159,7 @@ def main():
         "unfolded_states": label.shape[0] - label.sum(),
         "folded_percentage": label.sum() / label.shape[0] * 100,
         "bond_sum_histogram": wandb.Image(plt.gcf()),
+        # "bond_sum_frequency": wandb.Table(data=np.array([unique_values, counts]), columns=["Bond Sum", "Frequency"]),
     })
     wandb.finish()
 

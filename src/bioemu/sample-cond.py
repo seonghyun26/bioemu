@@ -19,7 +19,6 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 
 import torch.nn as nn
 import mdtraj as md
-import pyemma
 
 
 from .chemgraph import ChemGraph
@@ -34,10 +33,6 @@ from .utils import (
     print_traceback_on_exception,
 )
 from bioemu.models import DiGConditionalScoreModel
-
-# from mlcolvar.cvs import BaseCV, DeepTDA
-# from mlcolvar.core import FeedForward, Normalization
-from mlcolvar.core.transform import Transform
 
 from model import *
 
@@ -100,6 +95,11 @@ def main(cfg: DictConfig) -> None:
         msa_host_url: MSA server URL. If not set, this defaults to colabfold's remote server. If sequence is an a3m file, this is ignored.
         filter_samples: Filter out unphysical samples with e.g. long bond distances or steric clashes.
     """
+    cache_embeds_dir = None
+    cache_so3_dir = None
+    msa_host_url = None
+    denoiser_config_path = None
+    
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     output_dir = Path(cfg.sample.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)  # Fail fast if output_dir is non-writeable
@@ -107,11 +107,7 @@ def main(cfg: DictConfig) -> None:
     method = cfg.model.mlcv_model.name
     mlcv_dim = cfg.model.mlcv_model.mlcv_dim
     
-    cache_embeds_dir = None
-    cache_so3_dir = None
-    msa_host_url = None
-    denoiser_config_path = None
-    
+    # NOTE: Check model path
     ckpt_path = cfg.sample.ckpt_path
     model_config_path = cfg.sample.model_config_path
     ckpt_path, model_config_path = maybe_download_checkpoint(
@@ -122,18 +118,8 @@ def main(cfg: DictConfig) -> None:
     model_config["score_model"]["condition_mode"] = cfg.model.mlcv_model.condition_mode
     score_model: DiGConditionalScoreModel = hydra.utils.instantiate(model_config["score_model"])
     
-    # NOTE: Load score model - CRITICAL FIX: Load base model first, then add conditioning modules
-    # Load the checkpoint first
+    # NOTE: Load score model
     cond_ft_model_state = torch.load(ckpt_path, weights_only=True)
-    
-    # Load the base model state (this will load the pretrained weights but not the conditioning modules)
-    try:
-        score_model.load_state_dict(cond_ft_model_state["model_state_dict"], strict=False)
-        print("✓ Loaded base model weights (strict=False to allow missing conditioning modules)")
-    except Exception as e:
-        print(f"Warning: Could not load base model state: {e}")
-    
-    # Now add conditioning modules with the same initialization as training
     if condition_mode in ["input", "latent"]:
         hidden_dim = 512
     elif condition_mode in ["backbone", "backbone-both"]:
@@ -142,70 +128,42 @@ def main(cfg: DictConfig) -> None:
         hidden_dim = 512
     else:
         raise ValueError(f"Invalid condition_mode: {condition_mode}")
-    
     if condition_mode in ["input", "latent", "backbone"]:
         zero_linear = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
         zero_mlp = nn.Sequential(zero_linear, nn.ReLU())
         score_model.model_nn.add_module(f"zero_conv_mlp", zero_mlp)
-        
     elif condition_mode == "backbone-both":
         zero_linear_pos = nn.Linear(hidden_dim + mlcv_dim, hidden_dim)
         zero_mlp_pos = nn.Sequential(zero_linear_pos, nn.ReLU())
         score_model.model_nn.add_module(f"zero_conv_mlp_pos", zero_mlp_pos)
-        
         zero_linear_orient = nn.Linear(2 + mlcv_dim, 3)
         zero_mlp_orient = nn.Sequential(zero_linear_orient, nn.ReLU())
         score_model.model_nn.add_module(f"zero_conv_mlp_orient", zero_mlp_orient)
-    
-    # Now load the trained conditioning weights if they exist in the checkpoint
-    try:
-        score_model.load_state_dict(cond_ft_model_state["model_state_dict"], strict=False)
-        print("✓ Loaded trained conditioning module weights")
-    except Exception as e:
-        print(f"Warning: Could not load conditioning weights: {e}")
-        print("This might mean the conditioning modules weren't properly saved during training")
+    else:
+        raise ValueError(f"Invalid condition_mode: {condition_mode}")
+    score_model.load_state_dict(cond_ft_model_state["model_state_dict"], strict=False)
     score_model.eval()
     
-    # CRITICAL: Ensure conditioning modules are also in eval mode
     if condition_mode in ["input", "latent", "backbone"]:
         if hasattr(score_model.model_nn, 'zero_conv_mlp'):
             score_model.model_nn.zero_conv_mlp.eval()
-            print("✓ Set zero_conv_mlp to eval mode")
     elif condition_mode == "backbone-both":
         if hasattr(score_model.model_nn, 'zero_conv_mlp_pos'):
             score_model.model_nn.zero_conv_mlp_pos.eval()
-            print("✓ Set zero_conv_mlp_pos to eval mode")
         if hasattr(score_model.model_nn, 'zero_conv_mlp_orient'):
             score_model.model_nn.zero_conv_mlp_orient.eval()
-            print("✓ Set zero_conv_mlp_orient to eval mode")
-    
-    # Move model to device
-    score_model = score_model.to(device)
-    
-    # Enable debug mode to match training behavior
-    if hasattr(score_model.model_nn, '_debug_conditioning'):
-        score_model.model_nn._debug_conditioning = True
-        print("✓ Enabled debug mode for conditioning")
-    if hasattr(score_model.model_nn, 'st_module') and hasattr(score_model.model_nn.st_module, '_debug_conditioning'):
-        score_model.model_nn.st_module._debug_conditioning = True
-        print("✓ Enabled debug mode for st_module conditioning")
-    
-    # Debug: Check model mode and conditioning setup
-    print(f"=== MODEL STATE DEBUG ===")
-    print(f"Score model training mode: {score_model.training}")
-    print(f"Score model condition_mode: {getattr(score_model.model_nn, 'condition_mode', 'not set')}")
-    if hasattr(score_model.model_nn, 'zero_conv_mlp'):
-        print(f"zero_conv_mlp exists: {score_model.model_nn.zero_conv_mlp is not None}")
-        print(f"zero_conv_mlp training mode: {score_model.model_nn.zero_conv_mlp.training}")
     else:
-        print("zero_conv_mlp: NOT FOUND")
-    print(f"=== END MODEL STATE DEBUG ===")
+        raise ValueError(f"Invalid condition_mode: {condition_mode}")
+    score_model = score_model.to(device)
+
     
     # NOTE: Load MLCV model
     if method == "ours":
         mlcv_model = load_ours(
+            input_dim=cfg.data.input_dim,
             mlcv_dim=mlcv_dim,
-            dim_normalization=cfg.model.mlcv_model.dim_normalization,
+            # dim_normalization=cfg.model.mlcv_model.dim_normalization,
+            dim_normalization=False,
             normalization_factor=cfg.model.mlcv_model.normalization_factor,
         ).to(device)
         mlcv_model.load_state_dict(cond_ft_model_state["mlcv_state_dict"])
@@ -224,45 +182,21 @@ def main(cfg: DictConfig) -> None:
     mlcv_feature, _ = md.compute_contacts(
         state_traj, scheme="ca", contacts=ca_resid_pair, periodic=False
     )
-    # Debug: Print detailed MLCV information
-    print(f"=== MLCV DEBUGGING ===")
-    print(f"CA contact features shape: {mlcv_feature.shape}")
-    print(f"CA contact feature range: [{mlcv_feature.min():.6f}, {mlcv_feature.max():.6f}]")
-    print(f"CA contact feature mean: {mlcv_feature.mean():.6f}, std: {mlcv_feature.std():.6f}")
-    
-    # Apply MLCV model
     mlcv_input = torch.from_numpy(mlcv_feature).to(device).float()
     cond_mlcv = mlcv_model(mlcv_input)
     print(f"MLCV model output shape: {cond_mlcv.shape}")
     print(f"MLCV model output range: [{cond_mlcv.min().item():.6f}, {cond_mlcv.max().item():.6f}]")
     
-    # Validate MLCV values are reasonable (not NaN, not too large)
-    if torch.isnan(cond_mlcv).any():
-        print("❌ ERROR: MLCV contains NaN values!")
-        cond_mlcv = torch.zeros_like(cond_mlcv)
-        print("→ Using zero MLCV as fallback")
-    elif torch.abs(cond_mlcv).max() > 100:
-        print(f"⚠️  WARNING: MLCV values are very large (max: {torch.abs(cond_mlcv).max():.2f})")
-        print("→ This might cause numerical instability during sampling")
-    else:
-        print("✓ MLCV values appear reasonable")
-    
+    # NOTE: Load SDEs and denoiser
     sdes = load_sdes(
         model_config_path=model_config_path,
         cache_so3_dir=cache_so3_dir
     )
-
-    # User may have provided an MSA file instead of a sequence. This will be used for embeddings.
     msa_file = cfg.sample.sequence if str(cfg.sample.sequence).endswith(".a3m") else None
-
     if msa_file is not None and msa_host_url is not None:
         logger.warning(f"msa_host_url is ignored because MSA file {msa_file} is provided.")
-
-    # Parse FASTA or A3M file if sequence is a file path. Extract the actual sequence.
-    # Check input sequence is valid
     sequence = parse_sequence(cfg.sample.sequence)
     check_protein_valid(sequence)
-
     fasta_path = output_dir / "sequence.fasta"
     if fasta_path.is_file():
         if parse_sequence(fasta_path) != sequence:
@@ -270,9 +204,7 @@ def main(cfg: DictConfig) -> None:
                 f"{fasta_path} already exists, but contains a sequence different from {sequence}!"
             )
     else:
-        # Save FASTA file in output_dir
         write_fasta([sequence], fasta_path)
-
     if cfg.sample.denoiser_config_path is None or cfg.sample.denoiser_config_path == "None":
         assert (
             cfg.sample.denoiser_type in SUPPORTED_DENOISERS
@@ -280,22 +212,13 @@ def main(cfg: DictConfig) -> None:
         denoiser_config_path = DEFAULT_DENOISER_CONFIG_DIR / f"{cfg.sample.denoiser_type}.yaml"
     else:
         denoiser_config_path = cfg.sample.denoiser_config_path
-
     with open(denoiser_config_path) as f:
         denoiser_config = yaml.safe_load(f)
     denoiser = hydra.utils.instantiate(denoiser_config)
 
-    logger.info(
-        f"Sampling {cfg.sample.num_samples} structures for sequence of length {len(sequence)} residues..."
-    )
-    batch_size = int(cfg.sample.batch_size_100 * (100 / len(sequence)) ** 2)
-    if batch_size == 0:
-        logger.warning(f"Sequence {sequence} may be too long. Attempting with batch_size = 1.")
-        batch_size = 1
-    logger.info(f"Using batch size {min(batch_size, cfg.sample.num_samples)}")
-
-
+    # NOTE: Sampling
     existing_num_samples = count_samples_in_output_dir(output_dir)
+    batch_size = int(cfg.sample.batch_size_100 * (100 / len(sequence)) ** 2)
     logger.info(f"Found {existing_num_samples} previous samples in {output_dir}.")
     for seed in tqdm(
         range(existing_num_samples, cfg.sample.num_samples, batch_size), desc="Sampling batches..."
@@ -307,8 +230,6 @@ def main(cfg: DictConfig) -> None:
                 f"Not sure why {npz_path} already exists when so far only {existing_num_samples} samples have been generated."
             )
         logger.info(f"Sampling {seed=}")
-        
-        # CRITICAL FIX: Ensure MLCV is properly replicated for the batch
         actual_batch_size = min(batch_size, n)
         cond_mlcv_expanded = cond_mlcv.repeat(actual_batch_size, 1)
         
@@ -365,7 +286,6 @@ def main(cfg: DictConfig) -> None:
         pos_nm=positions,
         node_orientations=node_orientations,
         topology_path=output_dir / "topology.pdb",
-        # topology_path=backbone_pdb,
         xtc_path=output_dir / "samples.xtc",
         sequence=sequence,
         filter_samples=cfg.sample.filter_samples,

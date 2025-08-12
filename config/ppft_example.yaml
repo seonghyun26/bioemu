@@ -1,0 +1,72 @@
+# Example configuration for PPFT (Property-Prediction Fine-Tuning)
+# This is the original expensive rollout method
+
+# Basic settings
+name: "ppft_example"
+log:
+  date: "debug"  # or "now" for timestamp
+  tags: ["ppft", "rollout_training"]
+  debug: true
+  debug_mlcv: false
+  debug_spikes: false
+  ckpt_freq: 10
+
+# Data settings
+data:
+  representation: "cad"  # or "cad-pos"
+  sequence: "YYDPETGTWY"
+  system_id: 1
+
+# Model settings
+model:
+  # Score model (pretrained)
+  score_model:
+    ckpt_path: "path/to/your/score_model.pt"
+    cfg_path: "path/to/your/score_model_config.yaml"
+    mode: "train"  # Fine-tune the score model
+    init: "zero"   # Initialization for conditioning layers
+    last_training: 1.0  # Train score model throughout
+
+  # MLCV model
+  mlcv_model:
+    name: "ours"  # or "tda", "tae", "vde"
+    condition_mode: "latent"  # or "input", "backbone", "backbone-both", "input-control"
+    mlcv_dim: 1
+    dim_normalization: false
+    normalization_factor: 1.0
+
+  # Training settings
+  training:
+    method: "ppft"  # Use original PPFT method with expensive rollouts
+    
+    # Standard training params
+    learning_rate: 1e-4
+    num_epochs: 100
+    batch_size: 8
+    seed: 42
+    gradient_clip_val: 1.0        # Gradient clipping
+    
+    # Scheduler settings
+    scheduler:
+      name: "CosineAnnealingLR"   # or "CosineAnnealingWarmUpRestarts"
+      T_mult: 1
+      eta_max: 1e-3
+      warmup_epochs: 10
+      gamma: 0.5
+
+  # Rollout settings (used for PPFT method)
+  rollout:
+    mid_t: 0.1                    # Intermediate timestep for rollout
+    N_rollout: 10                 # Number of denoising steps in rollout
+    record_grad_steps: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # Steps with gradients
+
+# Logging settings
+log:
+  mlcv_model:
+    watch: true
+    log: "all"
+    watch_freq: 10
+  score_model:
+    watch: true
+    log: "all"
+    watch_freq: 10

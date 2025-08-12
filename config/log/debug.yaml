@@ -1,0 +1,15 @@
+tags:
+- debug
+- ours
+score_model:
+  watch: True
+  log: all
+  watch_freq: 2
+mlcv_model:
+  watch: True
+  log: all
+  watch_freq: 2
+date: now
+ckpt_freq: 2
+debug: True
+debug_mlcv: True

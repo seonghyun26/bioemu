@@ -1,0 +1,7 @@
+sequence: DAYAQWLKDHHPSSGRPPPS
+input_dim: 190
+system_id: 2JOF
+time_lag: 10
+representation: cad-pos
+dataset_size: 5k
+data_dir: /home/shpark/prj-mlcv/lib/DESRES/dataset

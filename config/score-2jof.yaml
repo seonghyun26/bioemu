@@ -1,0 +1,5 @@
+defaults:
+- data: 2JOF-5k-cad-pos
+- log: basic
+- model: input-score
+- sample: basic

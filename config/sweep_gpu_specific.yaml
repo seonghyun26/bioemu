@@ -1,0 +1,36 @@
+# GPU-specific sweep configuration
+# This config is designed to work with manual GPU assignment
+# Usage: CUDA_VISIBLE_DEVICES=0 python control.py --config-name sweep_gpu_specific --multirun
+
+defaults:
+  - data: CLN025-cad-pos
+  - log: basic
+  - model: input-score
+
+# Basic multirun setup
+hydra:
+  mode: MULTIRUN
+  sweep:
+    dir: outputs/gpu_sweeps/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: gpu_${oc.env:CUDA_VISIBLE_DEVICES,0}/${hydra.job.name}
+  job:
+    chdir: true
+
+# Log configuration with GPU information
+log:
+  date: ${now:%m%d_%H%M%S}_gpu${oc.env:CUDA_VISIBLE_DEVICES,0}
+  tags: ['gpu_sweep', 'gpu_${oc.env:CUDA_VISIBLE_DEVICES,0}']
+
+# Smaller parameter space for per-GPU execution
+model:
+  mlcv_model:
+    mlcv_dim: 1,2,4  # Fewer values per GPU
+    condition_mode: input
+    
+  training:
+    learning_rate: 1e-5,1e-4,1e-3  # 3 values
+    batch_size: 64,128             # 2 values
+    method: standard               # Fixed method for faster execution
+    num_epochs: 50                 # Fixed epochs
+    
+# Total combinations per GPU: 3 * 3 * 2 = 18 runs

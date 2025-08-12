@@ -387,9 +387,6 @@ def dpm_solver(
         batch.pos = batch.pos + score_model.model_nn.get_submodule("zero_conv_mlp")(torch.cat([batch.pos, mlcv_expanded], dim=1))
     
     elif condition_mode == "input" and mlcv is not None:
-        # For input mode, conditioning is applied inside the score model during get_score() calls
-        # No need to modify the batch here, just ensure MLCV is passed to get_score()
-        # Debug: Verify input conditioning will work
         if cfg and cfg.log.debug_mlcv and hasattr(score_model, 'model_nn') and hasattr(score_model.model_nn, 'zero_conv_mlp'):
             print(f"        [dpm_solver] Input conditioning: MLCV will be applied via score model")
             print(f"        [dpm_solver] MLCV shape: {mlcv.shape}, range: [{mlcv.min().item():.3f}, {mlcv.max().item():.3f}]")
@@ -415,11 +412,6 @@ def dpm_solver(
 
         # Evaluate score
         with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
-            # Debug: Check MLCV before score computation
-            if cfg.log.debug_mlcv and i == 0 and condition_mode != "none" and mlcv is not None:
-                print(f"        [dpm_solver] Step {i}: Passing MLCV to get_score")
-                print(f"        [dmp_solver] MLCV shape: {mlcv.shape}, values: {mlcv.flatten()[:3]}")
-            
             score = get_score(
                 batch=batch,
                 t=t,
@@ -485,10 +477,7 @@ def dpm_solver(
 
         # Correction step
         # Evaluate score at updated pos and node orientations
-        with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):
-            if cfg.log.debug_mlcv and i == 0 and condition_mode != "none" and mlcv is not None:
-                print(f"        [dpm_solver] Correction step {i}: Passing MLCV to get_score")
-            
+        with torch.set_grad_enabled(grad_is_enabled and (i in record_grad_steps)):            
             score_u = get_score(
                 batch=batch_u,
                 t=t_lambda,

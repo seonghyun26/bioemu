@@ -204,11 +204,12 @@ class VariationalDynamicsEncoder(VariationalAutoEncoderCV):
 
 def load_ours(
     mlcv_dim: int = 2,
+    input_dim: int = 45,
     dim_normalization: bool = False,
     normalization_factor: float = 1.0,
     **kwargs,
 ):
-    encoder_layers = [45, 100, 100, mlcv_dim]
+    encoder_layers = [input_dim, 100, 100, mlcv_dim]
     options = {
         "encoder": {
             "activation": "tanh",

@@ -95,9 +95,13 @@ def _rollout(
     # Predict clean x (x0) from x_mid in a single jump.
     # This step is always with gradient.
     mid_t_expanded = torch.full((batch_size,), mid_t, device=device)
-    score_mid_t = get_score(batch=x_mid, sdes=sdes, t=mid_t_expanded, score_model=score_model)[
-        "pos"
-    ]
+    score_mid_t = get_score(
+        batch=x_mid,
+        sdes=sdes,
+        t=mid_t_expanded,
+        score_model=score_model,
+        mlcv=None,
+    )["pos"]
 
     # No need to compute orientations, because they are not used to compute foldedness.
     x0_pos = _get_x0_given_xt_and_score(
