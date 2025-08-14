@@ -58,7 +58,6 @@ opes: METAD ...
     SIGMA=0.2
     HEIGHT=0.965
     TEMP=340
-    BIASFACTOR=12.765  # 4000 K
     GRID_MIN=-8.5
     GRID_MAX=8.5
 ...
