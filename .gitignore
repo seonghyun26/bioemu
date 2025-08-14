@@ -133,6 +133,9 @@ cython_debug/
 *.pt
 *.gz
 *.pdb
+*.cpt
+*.gro
+*.edr
 
 *.npz
 *.xtc
@@ -141,3 +144,7 @@ cython_debug/
 *wandb*
 *res*
 *outputs*
+
+
+# OPES
+*/opes/simulations/*
