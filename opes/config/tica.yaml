@@ -1,0 +1,8 @@
+method: tica
+molecule: cln025
+seed: 0
+step: 1_000_000
+ckpt_dir: _baseline_
+ckpt_path: tica-CLN025
+tags: ['opes']
+gpu: 5

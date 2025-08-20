@@ -144,6 +144,7 @@ cython_debug/
 *wandb*
 *res*
 *outputs*
+*img*
 
 
 # OPES

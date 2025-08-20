@@ -1,5 +1,5 @@
 defaults:
-- data: 2JOF-50k-cad-pos
+- data: 2F4K-50k-cad-pos
 - log: basic
 - model: input-score
 - sample: basic

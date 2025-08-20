@@ -1,0 +1,7 @@
+sequence: LSDEDFKAVFGMTRSAFANLPLWXQQHLXKEKGLF
+input_dim: 595
+system_id: 2F4K
+time_lag: 10
+representation: cad-pos
+dataset_size: 50k
+data_dir: /home/shpark/prj-mlcv/lib/DESRES/dataset

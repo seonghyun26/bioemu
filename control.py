@@ -26,6 +26,53 @@ from bioemu.so3_sde import SO3SDE
 from data import *
 from model import *
 
+# For post-processing
+from mlcolvar.core.transform import Statistics, Transform
+
+
+def sanitize_range(range_tensor: torch.Tensor) -> torch.Tensor:
+    """Sanitize range tensor to avoid division by zero"""
+    if (range_tensor < 1e-6).nonzero().sum() > 0:
+        print(
+            "[Warning] Normalization: the following features have a range of values < 1e-6:",
+            (range_tensor < 1e-6).nonzero(),
+        )
+    range_tensor[range_tensor < 1e-6] = 1.0
+    return range_tensor
+
+
+class PostProcess(Transform):
+    """Post-processing module for MLCV normalization and sign flipping"""
+    def __init__(
+        self,
+        stats=None,
+        reference_frame_cv=None,
+        feature_dim=1,
+    ):
+        super().__init__(in_features=feature_dim, out_features=feature_dim)
+        self.register_buffer("mean", torch.zeros(feature_dim))
+        self.register_buffer("range", torch.ones(feature_dim))
+        
+        if stats is not None:
+            min_val = stats["min"]
+            max_val = stats["max"]
+            self.mean = (max_val + min_val) / 2.0
+            range_val = (max_val - min_val) / 2.0
+            self.range = sanitize_range(range_val)
+        
+        if reference_frame_cv is not None:
+            self.register_buffer(
+                "flip_sign",
+                torch.ones(1) * -1 if reference_frame_cv < 0 else torch.ones(1)
+            )
+        else:
+            self.register_buffer("flip_sign", torch.ones(1))
+        
+    def forward(self, x):
+        x = x.sub(self.mean).div(self.range)
+        x = x * self.flip_sign
+        return x
+
 
 # SINGLE_EMBED_FILE = "/home/shpark/.bioemu_embeds_cache/539b322bacb5376ca1c0a5ccad3196eb77b38dae8a09ae4a6cb83f40826936a7_single.npy"
 # PAIR_EMBED_FILE = "/home/shpark/.bioemu_embeds_cache/539b322bacb5376ca1c0a5ccad3196eb77b38dae8a09ae4a6cb83f40826936a7_pair.npy"
@@ -33,103 +80,6 @@ from model import *
 # OUTPUT_DIR = Path("~/prj-mlcv/lib/bioemu/ppft_example_output").expanduser()
 # OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 cln025_alpha_carbon_idx = [4, 25, 46, 60, 72, 87, 101, 108, 122, 146]
-
-
-def foldedness_by_hbond(
-    traj,
-    distance_cutoff=0.35,
-    bond_number_cutoff=3
-):
-	"""
-	Generate binary labels for folded/unfolded states based at least 3 bonds among eight bonds
-	- TYR1T-YR10OT1
-	- TYR1T-YR10OT2
-	- ASP3N-TYR8O
-	- THR6OG1-ASP3O
-	- THR6N-ASP3OD1
-	- THR6N-ASP3OD2
-	- TYR10N-TYR1O
-
-
-	Args:
-		traj (mdtraj): mdtraj trajectory object
-		distance_cutoff (float): donor-acceptor distance cutoff in nm (default 0.35 nm = 3.5 amstrong)
-		angle_cutoff (float): hydrogen bond angle cutoff in degrees (default 110 deg)
-		bond_number_cutoff (int): minimum number of bonds to be considered as folded (default 3)
-
-	Returns:
-		labels (np.array): binary array (1: folded, 0: unfolded)
-	"""
-	# TYR1N-YR10OT1
-	donor_idx = traj.topology.select('residue 1 and name N')[0] # Tyr1:N
-	acceptor_idx = traj.topology.select('residue 10 and name O')[0]   # Tyr10:OT1
-	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-	label_O1 = ((distance[:,0] < distance_cutoff)).astype(int)
-	label_O2 = ((distance[:,0] < distance_cutoff)).astype(int) 
-	label_O3 = ((distance[:,0] < distance_cutoff)).astype(int)
-	label_TYR1N_TYR10OT1 = label_O1 | label_O2 | label_O3
-
-
-	# TYR1N-YR10OT2
-	donor_idx = traj.topology.select('residue 1 and name N')[0] # Tyr1:N
-	acceptor_idx = traj.topology.select('residue 10 and name OXT')[0]   # Tyr10:OT2
-	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-	label_O1 = ((distance[:,0] < distance_cutoff)).astype(int)
-	label_O2 = ((distance[:,0] < distance_cutoff)).astype(int)
-	label_O3 = ((distance[:,0] < distance_cutoff)).astype(int)
-	label_TYR1N_TYR10OT2 = label_O1 | label_O2 | label_O3
-
-
-	# ASP3N-TYR8O
-	donor_idx = traj.topology.select('residue 3 and name N')[0]
-	acceptor_idx = traj.topology.select('residue 8 and name O')[0]
-	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-	label_ASP3N_TYR8O = ((distance[:,0] < distance_cutoff)).astype(int)
- 
- 
-	# THR6OG1-ASP3O
-	donor_idx = traj.topology.select('residue 6 and name OG1')[0]
-	acceptor_idx = traj.topology.select('residue 3 and name O')[0]
-	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-	label_THR6OG1_ASP3O = ((distance[:,0] < distance_cutoff)).astype(int)
- 
- 
-	# THR6N-ASP3OD1
-	donor_idx = traj.topology.select('residue 6 and name N')[0]
-	acceptor_idx = traj.topology.select('residue 3 and name OD1')[0]
-	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-	label_THR6N_ASP3OD1 = ((distance[:,0] < distance_cutoff)).astype(int)
- 
-	# THR6N-ASP3OD2
-	donor_idx = traj.topology.select('residue 6 and name N')[0]
-	acceptor_idx = traj.topology.select('residue 3 and name OD2')[0]
-	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-	label_THR6N_ASP3OD2 = ((distance[:,0] < distance_cutoff)).astype(int)
- 
- 
-	# GLY7N-ASP3O
-	donor_idx = traj.topology.select('residue 7 and name N')[0]
-	acceptor_idx = traj.topology.select('residue 3 and name O')[0]
-	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-	label_GLY7N_ASP3O = ((distance[:,0] < distance_cutoff)).astype(int)
- 
-
-	# TYR10N-TYR1O
-	donor_idx = traj.topology.select('residue 10 and name N')[0] 
-	acceptor_idx = traj.topology.select('residue 1 and name O')[0] 
-	distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-	label_TYR10N_TYR1O = ((distance[:,0] < distance_cutoff)).astype(int)
-
-
-
-
-	# ASP3OD_THR6OG1_ASP3N_THR8O
-	bond_sum = label_TYR1N_TYR10OT1 + label_TYR1N_TYR10OT2 + label_ASP3N_TYR8O + label_THR6OG1_ASP3O \
-		+ label_THR6N_ASP3OD1 + label_THR6N_ASP3OD2 + label_GLY7N_ASP3O + label_TYR10N_TYR1O
-	labels = bond_sum >= bond_number_cutoff
-
-	return labels, bond_sum
-
     
     
 def kabsch_rmsd(
@@ -702,6 +652,121 @@ def clip_loss(
     return loss, was_clipped
 
 
+def add_postprocessing_module(mlcv_model: torch.nn.Module, dataset: torch.utils.data.Dataset, device: torch.device, cfg: OmegaConf = None, reference_frame_path: str = None):
+    """
+    Add post-processing module to MLCV model based on full dataset statistics.
+    
+    Args:
+        mlcv_model: The trained MLCV model
+        dataset: The dataset to compute statistics from
+        device: Device to run computations on
+        cfg: Configuration object
+        reference_frame_path: Optional path to reference frame for sign flipping
+    """
+    print("Computing post-processing statistics on full dataset...")
+    
+    # Load full dataset for statistics computation
+    if cfg and hasattr(cfg.data, 'system_id'):
+        molecule = cfg.data.system_id
+        projection_data_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-cad.pt"
+        
+        if os.path.exists(projection_data_path):
+            projection_data = torch.load(projection_data_path).to(device)
+            print(f"Loaded full dataset from {projection_data_path}: {projection_data.shape}")
+        else:
+            print(f"Warning: Full dataset not found at {projection_data_path}")
+            print("Using current dataset for statistics...")
+            # Use current dataset as fallback
+            all_data = []
+            for batch in dataset:
+                all_data.append(batch["current_data"])
+            projection_data = torch.cat(all_data, dim=0).to(device)
+    else:
+        print("Using current dataset for statistics...")
+        # Use current dataset as fallback
+        all_data = []
+        for batch in dataset:
+            all_data.append(batch["current_data"])
+        projection_data = torch.cat(all_data, dim=0).to(device)
+    
+    # Evaluate model on full dataset
+    mlcv_model.eval()
+    with torch.no_grad():
+        cv = mlcv_model(projection_data)
+        cv_numpy = cv.detach().cpu().numpy()
+    
+    print(f"CV shape: {cv.shape}")
+    print(f"CV range: [{cv.min():.6f}, {cv.max():.6f}]")
+    
+    # Compute statistics for post-processing
+    stats = Statistics(cv.cpu()).to_dict()
+    
+    # Handle reference frame for sign flipping (optional)
+    reference_frame_cv = None
+    if reference_frame_path and os.path.exists(reference_frame_path):
+        try:
+            import mdtraj as md
+            ref_traj = md.load(reference_frame_path)
+            ref_pos = ref_traj.xyz[0]  # Get first (and only) frame
+            
+            # Convert to the same representation as training data
+            if cfg.data.representation == "cad":
+                # Compute CA distances
+                ca_indices = ref_traj.topology.select('name CA')
+                ref_ca_pos = ref_pos[ca_indices]
+                ref_distances = torch.cdist(torch.from_numpy(ref_ca_pos), torch.from_numpy(ref_ca_pos), p=2)
+                n = ref_distances.shape[0]
+                i, j = torch.triu_indices(n, n, offset=1)
+                ref_cad = ref_distances[i, j].unsqueeze(0).to(device)
+                
+                with torch.no_grad():
+                    reference_frame_cv = mlcv_model(ref_cad).item()
+                print(f"Reference frame CV value: {reference_frame_cv}")
+        except Exception as e:
+            print(f"Warning: Could not load reference frame from {reference_frame_path}: {e}")
+            reference_frame_cv = None
+    
+    # Create and attach post-processing module
+    mlcv_dim = cv.shape[1]
+    postprocessing = PostProcess(
+        stats=stats,
+        reference_frame_cv=reference_frame_cv,
+        feature_dim=mlcv_dim
+    ).to(device)
+    
+    # Attach to model
+    mlcv_model.postprocessing = postprocessing
+    
+    # Test post-processed output
+    with torch.no_grad():
+        postprocessed_cv = mlcv_model(projection_data)
+        print(f"Post-processed CV range: [{postprocessed_cv.min():.6f}, {postprocessed_cv.max():.6f}]")
+    
+    # Log post-processing statistics to wandb
+    postprocessing_stats = {
+        "postprocessing/original_cv_min": cv.min().item(),
+        "postprocessing/original_cv_max": cv.max().item(),
+        "postprocessing/original_cv_mean": cv.mean().item(),
+        "postprocessing/original_cv_std": cv.std().item(),
+        "postprocessing/processed_cv_min": postprocessed_cv.min().item(),
+        "postprocessing/processed_cv_max": postprocessed_cv.max().item(),
+        "postprocessing/processed_cv_mean": postprocessed_cv.mean().item(),
+        "postprocessing/processed_cv_std": postprocessed_cv.std().item(),
+        "postprocessing/normalization_mean": stats["mean"].item() if stats["mean"].numel() == 1 else stats["mean"][0].item(),
+        "postprocessing/normalization_range": postprocessing.range.item() if postprocessing.range.numel() == 1 else postprocessing.range[0].item(),
+        "postprocessing/flip_sign": postprocessing.flip_sign.item(),
+    }
+    
+    if reference_frame_cv is not None:
+        postprocessing_stats["postprocessing/reference_cv_value"] = reference_frame_cv
+    
+    wandb.log(postprocessing_stats)
+    
+    print("Post-processing module attached successfully!")
+    
+    return mlcv_model
+
+
 @hydra.main(
     version_base=None,
     config_path="config",
@@ -1123,15 +1188,6 @@ def main(cfg):
             "lr": optimizer.param_groups[0]['lr'],
             "epoch": epoch,
         }
-        if 'current_structure_metrics' in locals() and current_structure_metrics:
-            for key, value in current_structure_metrics.items():
-                log_data[f"structure/{key}"] = value
-            
-            if 'ca_sequential_dist_mean' in current_structure_metrics:
-                ca_mean = current_structure_metrics['ca_sequential_dist_mean']
-                ca_violations = current_structure_metrics.get('ca_sequential_dist_violations', 0)
-                log_data['structure/ca_health_score'] = max(0, 1 - ca_violations)  # Health score: 1 - violation_rate
-                log_data['structure/ca_realistic'] = 1 if 0.3 <= ca_mean <= 0.4 else 0  # 1 if CA distances are realistic
         wandb.log(log_data, step=epoch)
         
         # Save checkpoint
@@ -1152,7 +1208,22 @@ def main(cfg):
     print(f"\n=== TRAINING SUMMARY ===")
     print(f"Training completed: {num_epochs} epochs, {total_batches} total batches")
     
-    # Save final model weights
+    # Add post-processing module to MLCV model based on full dataset
+    print(f"\n=== POST-PROCESSING MODULE ===")
+    reference_frame_path = None
+    if hasattr(cfg.data, 'system_id') and cfg.data.system_id == "CLN025":
+        reference_frame_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{cfg.data.system_id}/6bond.pdb"
+        print(f"Using reference frame: {reference_frame_path}")
+    
+    mlcv_model = add_postprocessing_module(
+        mlcv_model=mlcv_model,
+        dataset=dataset,
+        device=device,
+        cfg=cfg,
+        reference_frame_path=reference_frame_path
+    )
+    
+    # Save final model weights (including post-processing)
     torch.save({
         'mlcv_state_dict': mlcv_model.state_dict(),
         'model_state_dict': score_model.state_dict(),
@@ -1165,6 +1236,8 @@ def main(cfg):
             'clips_per_epoch': clips_per_epoch,
         }
     }, f"model/{cfg.log.date}/final_model.pt")    
+    
+    # Save mlcv model with post-processing
     torch.save({
         'mlcv_state_dict': mlcv_model.state_dict(),
     }, f"model/{cfg.log.date}/mlcv_model.pt")

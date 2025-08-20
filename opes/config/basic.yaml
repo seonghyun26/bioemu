@@ -1,6 +1,7 @@
 method: ours
 molecule: cln025
 seed: 0
-step: 100_000
+step: 1_000_000
 ckpt_path: 0729_081523
 tags: ['opes']
+gpu: 3
