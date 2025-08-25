@@ -4,12 +4,12 @@ tags:
 score_model:
   watch: True
   log: all
-  watch_freq: 10
+  watch_freq: 100
 mlcv_model:
   watch: True
   log: all
-  watch_freq: 10
+  watch_freq: 100
 date: now
-ckpt_freq: 20
+ckpt_freq: 100
 debug: False
 debug_mlcv: False

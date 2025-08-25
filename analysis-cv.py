@@ -1,6 +1,10 @@
 import numpy as np
 import mdtraj as md
 import matplotlib.pyplot as plt
+import matplotlib.collections
+import matplotlib.lines
+import matplotlib.patches
+import matplotlib.image
 import plotly.graph_objects as go
 import pickle
 import torch
@@ -8,12 +12,14 @@ import lightning
 import os
 import argparse
 import pandas as pd
+import torch.nn.functional as F
 
 
 from matplotlib.colors import LogNorm
 from tqdm import tqdm
 from itertools import combinations
 from scipy.stats import pearsonr
+from torch.utils.data import DataLoader, TensorDataset
 
 
 from mlcolvar.cvs import BaseCV
@@ -27,8 +33,34 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Global settings
 np.bool = np.bool_
-CUDA_DEVICE = 0
+
+def get_available_cuda_device():
+    """Get the first available CUDA device, fallback to CPU if none available."""
+    if not torch.cuda.is_available():
+        print("CUDA not available, using CPU")
+        return "cpu"
+    
+    # Try cuda:1 first (as used in notebook), then cuda:0
+    for device_id in [1, 0]:
+        try:
+            device = f"cuda:{device_id}"
+            # Test if device is accessible
+            torch.tensor([1.0]).to(device)
+            print(f"Using device: {device}")
+            return device_id
+        except RuntimeError as e:
+            if "invalid device ordinal" in str(e):
+                continue
+            else:
+                raise e
+    
+    # If neither cuda:0 nor cuda:1 work, use the default
+    print("Using default CUDA device: cuda:0")
+    return 0
+
+CUDA_DEVICE = get_available_cuda_device()
 blue = (70 / 255, 110 / 255, 250 / 255)
+colors = ['blue', 'red', 'green', 'orange', 'purple', 'cyan', 'brown', 'magenta']
 
 class DIM_NORMALIZATION(Transform):
     """Dimension normalization transform for MLCV model."""
@@ -162,9 +194,9 @@ def load_model_and_data(model_type, molecule, date=None):
         'cad': f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-{simulation_idx}-protein/{molecule}-{simulation_idx}-cad.pt",
         'cad-switch': f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-{simulation_idx}-protein/{molecule}-{simulation_idx}-cad-switch.pt"
     }
-    pos_torch = torch.load(data_paths['pos'])
-    cad_torch = torch.load(data_paths['cad'])
-    cad_switch_torch = torch.load(data_paths['cad-switch'])
+    pos_torch = torch.load(data_paths['pos']).to(f"cuda:{CUDA_DEVICE}")
+    cad_torch = torch.load(data_paths['cad']).to(f"cuda:{CUDA_DEVICE}")
+    cad_switch_torch = torch.load(data_paths['cad-switch']).to(f"cuda:{CUDA_DEVICE}")
     if molecule == "CLN025":
         TICA_SWITCH = True
     else:
@@ -172,41 +204,26 @@ def load_model_and_data(model_type, molecule, date=None):
     
     if model_type == "mlcv":
         if molecule == "CLN025":
-            INPUT_DIM = 45
-            MLCV_DIM = 1
-            dim_normalization = False
             date = date or "0816_171833"
+        
         elif molecule == "2JOF":
-            INPUT_DIM = 190
-            MLCV_DIM = 1
-            dim_normalization = False
             date = date or "0812_125552"
         
-        # MLCV model configuration
-        # save_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/mlcv_model.pt"
-        # model_state = torch.load(save_path)
-        # mlcv_state_dict = model_state["mlcv_state_dict"]
-        # encoder_layers = [INPUT_DIM, 100, 100, MLCV_DIM]
-        # options = {
-        #     "encoder": {
-        #         "activation": "tanh",
-        #         "dropout": [0.1, 0.1, 0.1]
-        #     },
-        #     "norm_in": {},
-        # }
+        elif molecule == "2F4K":
+            date = date or "0819_173704"
         
-        # mlcv_model = MLCV(
-        #     mlcv_dim=MLCV_DIM,
-        #     encoder_layers=encoder_layers,
-        #     dim_normalization=dim_normalization,
-        #     options=options
-        # )
-        # mlcv_model.load_state_dict(mlcv_state_dict)
-        # mlcv_model.eval()
+        else:
+            raise ValueError(f"Invalid molecule: {molecule}")
+        
         save_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/mlcv_model-jit.pt"
-        mlcv_model = torch.jit.load(save_path)
+        mlcv_model = torch.jit.load(save_path, map_location=f"cuda:{CUDA_DEVICE}")
         mlcv_model.eval()
-        
+    
+    elif model_type == "mlcv-trans":
+        save_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/mlcv_model-jit.pt"
+        mlcv_model = torch.jit.load(save_path, map_location=f"cuda:{CUDA_DEVICE}")
+        mlcv_model.eval()
+    
     elif model_type == "tda":
         tda_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/_baseline_/tda-{molecule}-jit.pt"
         mlcv_model = torch.jit.load(tda_path)
@@ -255,11 +272,34 @@ def load_reference_structure(pdb_path, tica_wrapper):
     ref_cad = tica_wrapper.pos2cad(ref_pos.reshape(1, -1, 3))
     return ref_cad
 
-def compute_cv_values(mlcv_model, cad_torch, model_type, reference_cad=None):
-    """Compute CV values from the model with optional sign flipping."""
-    cv = mlcv_model(cad_torch)
-    cv = cv.detach().cpu().numpy()
+def compute_cv_values(mlcv_model, cad_torch, model_type, reference_cad=None, batch_size=10000):
+    """Compute CV values from the model with optional sign flipping using batch processing."""
+    dataset = TensorDataset(cad_torch)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    print(f"Computing CV values in batches of {batch_size}...")
+    
+    with torch.no_grad():
+        sample_batch = next(iter(dataloader))[0]
+        sample_output = mlcv_model(sample_batch)
+        output_dim = sample_output.shape[1]
+    cv_batches = torch.zeros((len(cad_torch), output_dim)).to(cad_torch.device)
+    
+    with torch.no_grad():
+        for batch_idx, (batch_data,) in enumerate(tqdm(
+            dataloader,
+            desc="Computing CV values",
+            total=len(dataloader),
+            leave=False,
+        )):
+            batch_cv = mlcv_model(batch_data)
+            start_idx = batch_idx * batch_size
+            end_idx = start_idx + batch_cv.shape[0]  # Handle last batch size correctly
+            cv_batches[start_idx:end_idx] = batch_cv
+    
+    cv = cv_batches.detach().cpu().numpy()
     MLCV_DIM = cv.shape[1]
+    
+    print(f"CV computation complete. Shape: {cv.shape}")
     
     if model_type == "mlcv":
         # Normalize CV values for MLCV
@@ -276,8 +316,9 @@ def compute_cv_values(mlcv_model, cad_torch, model_type, reference_cad=None):
         
     # Additional sign flipping based on reference structure
     if reference_cad is not None:
-        ref_cv = mlcv_model(torch.from_numpy(reference_cad))
-        ref_cv = ref_cv.detach().cpu().numpy()
+        with torch.no_grad():
+            ref_cv = mlcv_model(torch.from_numpy(reference_cad).to(cad_torch.device))
+            ref_cv = ref_cv.detach().cpu().numpy()
         
         # Normalize reference CV the same way
         if model_type == "mlcv":
@@ -303,6 +344,168 @@ def check_image_exists(img_dir, filename):
     """Check if image file already exists."""
     return os.path.exists(os.path.join(img_dir, f"{filename}.png"))
 
+def get_molecule_residue_range(molecule):
+    """
+    Get the residue indices and 0-indexed arrays for different molecules.
+    
+    Args:
+        molecule: Molecule name (e.g., "CLN025", "2JOF")
+        
+    Returns:
+        tuple: (residue_indices, residue_indices_0) where residue_indices are 1-indexed
+               and residue_indices_0 are 0-indexed for array slicing
+    """
+    if molecule == "CLN025":
+        residue_indices = list(range(2, 11))  # 2,3,4,5,6,7,8,9,10
+        residue_indices_0 = [1, 2, 3, 4, 5, 6, 7, 8, 9]  # 0-indexed for residues 2-10
+    elif molecule == "2JOF":
+        residue_indices = list(range(1, 16))  # 1-15
+        residue_indices_0 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]  # 0-indexed for residues 1-15
+    else:
+        print(f"No specific residue range defined for molecule {molecule}, using all residues")
+        residue_indices = None
+        residue_indices_0 = None
+    
+    return residue_indices, residue_indices_0
+
+def load_and_filter_dssp_data(molecule):
+    """
+    Load and filter DSSP data for a specific molecule based on predefined residue ranges.
+    
+    Args:
+        molecule: Molecule name (e.g., "CLN025", "2JOF")
+        
+    Returns:
+        dict: Dictionary containing filtered DSSP data and metadata:
+              - 'dssp_full': Filtered full DSSP data (or None if not found)
+              - 'dssp_simplified': Filtered simplified DSSP data (or None if not found)
+              - 'residue_indices': 1-indexed residue numbers for labels
+              - 'filtered': Boolean indicating if filtering was applied
+    """
+    # Get residue ranges for this molecule
+    residue_indices, residue_indices_0 = get_molecule_residue_range(molecule)
+    
+    # Load DSSP data
+    dssp_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-dssp.npy"
+    dssp_simplified_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-dssp-simplified.npy"
+    
+    # Initialize results
+    result = {
+        'dssp_full': None,
+        'dssp_simplified': None,
+        'residue_indices': residue_indices,
+        'filtered': residue_indices is not None
+    }
+    
+    # Load full DSSP data
+    if os.path.exists(dssp_path):
+        dssp_full = np.load(dssp_path)
+        if residue_indices_0 is not None:
+            result['dssp_full'] = dssp_full[:, residue_indices_0]
+            print(f"Loaded and filtered DSSP full data for {molecule}: using residues {residue_indices}")
+        else:
+            result['dssp_full'] = dssp_full
+            print(f"Loaded DSSP full data for {molecule}: using all residues")
+    else:
+        print(f"DSSP full data not found at {dssp_path}")
+    
+    # Load simplified DSSP data
+    if os.path.exists(dssp_simplified_path):
+        dssp_simplified = np.load(dssp_simplified_path)
+        if residue_indices_0 is not None:
+            result['dssp_simplified'] = dssp_simplified[:, residue_indices_0]
+            print(f"Loaded and filtered DSSP simplified data for {molecule}")
+        else:
+            result['dssp_simplified'] = dssp_simplified
+            print(f"Loaded DSSP simplified data for {molecule}: using all residues")
+    else:
+        print(f"DSSP simplified data not found at {dssp_simplified_path}")
+    
+    return result
+
+def rasterize_plot_elements():
+    """
+    Apply rasterization to data elements in the current figure while keeping text/labels as vectors.
+    This reduces file size for plots with many data points.
+    """
+    fig = plt.gcf()
+    for ax in fig.get_axes():
+        for child in ax.get_children():
+            if hasattr(child, 'set_rasterized'):
+                # Rasterize data elements but keep text/labels as vectors
+                if any(isinstance(child, cls) for cls in [
+                    matplotlib.collections.Collection,    # Scatter plots, hexbin, etc.
+                    matplotlib.lines.Line2D,              # Line plots
+                    matplotlib.patches.Rectangle,         # Bar plots, histograms
+                    matplotlib.patches.Polygon,           # Violin plots
+                    matplotlib.image.AxesImage,           # Heatmaps, images
+                ]):
+                    child.set_rasterized(True)
+
+def save_plot_dual_format(
+    img_dir,
+    filename,
+    dpi=200,
+    bbox_inches='tight',
+    pad_inches=0.1,
+    rasterized=True,
+):
+    """
+    Save plot in both PNG and PDF formats with existence checking.
+    
+    Args:
+        img_dir: Directory to save images
+        filename: Base filename without extension
+        dpi: Resolution for PNG format
+        bbox_inches: Bounding box setting for tight layout
+        pad_inches: Padding for tight layout
+        rasterized: Whether to rasterize the plot elements (reduces file size)
+    
+    Returns:
+        bool: True if files were saved, False if they already existed
+    """
+    os.makedirs(img_dir, exist_ok=True)
+    
+    png_path = os.path.join(img_dir, f"{filename}.png")
+    pdf_path = os.path.join(img_dir, f"{filename}.pdf")
+    
+    # Check if both files already exist
+    if os.path.exists(png_path) and os.path.exists(pdf_path):
+        print(f"> Skipping {filename} - both PNG and PDF already exist")
+        return False
+    
+    # Apply rasterization to plot elements if requested
+    if rasterized:
+        rasterize_plot_elements()
+    
+    # Save in both formats
+    try:
+        # Save as PNG
+        if not os.path.exists(png_path):
+            plt.savefig(
+                png_path,
+                dpi=dpi,
+                bbox_inches=bbox_inches,
+                pad_inches=pad_inches,
+            )
+            print(f">> Saved {png_path}")
+        
+        # Save as PDF
+        if not os.path.exists(pdf_path):
+            plt.savefig(
+                pdf_path,
+                dpi=dpi,
+                bbox_inches=bbox_inches,
+                pad_inches=pad_inches,
+            )
+            print(f">> Saved {pdf_path}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error saving {filename}: {e}")
+        return False
+
 def plot_tica_cv_analysis(cv, tica_data, model_type, molecule, img_dir, date=None):
     x = tica_data[:, 0]
     y = tica_data[:, 1]
@@ -316,9 +519,9 @@ def plot_tica_cv_analysis(cv, tica_data, model_type, molecule, img_dir, date=Non
             filename += f"_{date}"
         
         if check_image_exists(img_dir, filename):
-            print(f"Skipping {filename}.png - already exists")
+            print(f"> Skipping {filename}.png - already exists")
             continue
-        print(f"Plotting TICA-CV analysis for {model_type} {molecule}")
+        print(f"> Plotting TICA-CV analysis for {model_type} {molecule}")
         
         fig = plt.figure(figsize=(7, 6))
         ax = fig.add_subplot(111)
@@ -332,7 +535,7 @@ def plot_tica_cv_analysis(cv, tica_data, model_type, molecule, img_dir, date=Non
         plt.xlabel("TIC 1")
         plt.ylabel("TIC 2")
         plt.title(f"CV {cv_dim} - {model_type.upper()}")
-        plt.savefig(os.path.join(img_dir, f"{filename}.png"), dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
         plt.close()
 
         # 3D scatter plot
@@ -341,7 +544,7 @@ def plot_tica_cv_analysis(cv, tica_data, model_type, molecule, img_dir, date=Non
             filename_3d += f"_{date}"
             
         if check_image_exists(img_dir, filename_3d):
-            print(f"Skipping {filename_3d}.png - already exists")
+            print(f"> Skipping {filename_3d}.png - already exists")
             continue
             
         z = cv[:, cv_dim]
@@ -356,7 +559,7 @@ def plot_tica_cv_analysis(cv, tica_data, model_type, molecule, img_dir, date=Non
         ax.set_zticks(ticks)
         ax.view_init(azim=-85)
         
-        plt.savefig(os.path.join(img_dir, f"{filename_3d}.png"), dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename_3d, dpi=300, bbox_inches='tight')
         plt.close()
 
 def plot_cv_tica_analysis(cv, tica_data, model_type, molecule, img_dir, date=None):
@@ -373,7 +576,7 @@ def plot_cv_tica_analysis(cv, tica_data, model_type, molecule, img_dir, date=Non
         filename_tica1 += f"_{date}"
     
     if not check_image_exists(img_dir, filename_tica1):
-        print(f"Plotting CV 2D histogram colored by TICA-1 for {model_type} {molecule}")
+        print(f"> Plotting CV 2D histogram colored by TICA-1 for {model_type} {molecule}")
         
         fig = plt.figure(figsize=(7, 6))
         ax = fig.add_subplot(111)
@@ -387,10 +590,10 @@ def plot_cv_tica_analysis(cv, tica_data, model_type, molecule, img_dir, date=Non
         plt.xlabel("CV 0")
         plt.ylabel("CV 1")
         plt.title(f"CV 2D Histogram (colored by TICA-1) - {model_type.upper()}")
-        plt.savefig(os.path.join(img_dir, f"{filename_tica1}.png"), dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename_tica1, dpi=300, bbox_inches='tight')
         plt.close()
     else:
-        print(f"Skipping {filename_tica1}.png - already exists")
+        print(f"> Skipping {filename_tica1}.png - already exists")
     
     # Plot for TICA-2 as colors
     filename_tica2 = f"cv2d-tica2_{model_type}"
@@ -398,7 +601,7 @@ def plot_cv_tica_analysis(cv, tica_data, model_type, molecule, img_dir, date=Non
         filename_tica2 += f"_{date}"
     
     if not check_image_exists(img_dir, filename_tica2):
-        print(f"Plotting CV 2D histogram colored by TICA-2 for {model_type} {molecule}")
+        print(f"> Plotting CV 2D histogram colored by TICA-2 for {model_type} {molecule}")
         
         fig = plt.figure(figsize=(7, 6))
         ax = fig.add_subplot(111)
@@ -412,10 +615,10 @@ def plot_cv_tica_analysis(cv, tica_data, model_type, molecule, img_dir, date=Non
         plt.xlabel("CV 0")
         plt.ylabel("CV 1")
         plt.title(f"CV 2D Histogram (colored by TICA-2) - {model_type.upper()}")
-        plt.savefig(os.path.join(img_dir, f"{filename_tica2}.png"), dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename_tica2, dpi=300, bbox_inches='tight')
         plt.close()
     else:
-        print(f"Skipping {filename_tica2}.png - already exists")
+        print(f"> Skipping {filename_tica2}.png - already exists")
 
 def plot_cv_histogram(cv, model_type, molecule, img_dir, date=None):
     MLCV_DIM = cv.shape[1]
@@ -423,14 +626,14 @@ def plot_cv_histogram(cv, model_type, molecule, img_dir, date=None):
     os.makedirs(img_dir, exist_ok=True)
     
     for cv_dim in range(MLCV_DIM):
-        filename = f"cv{cv_dim}_histogram_{model_type}_{molecule}"
+        filename = f"cv{cv_dim}_histogram_{model_type}"
         if date:
             filename += f"_{date}"
             
         if check_image_exists(img_dir, filename):
-            print(f"Skipping {filename}.png - already exists")
+            print(f"> Skipping {filename}.png - already exists")
             continue
-        print(f"Plotting CV histogram for {model_type} {molecule}")
+        print(f"> Plotting CV histogram for {model_type} {molecule}")
 
         cv_dim_val = cv[:, cv_dim]
         
@@ -462,7 +665,7 @@ def plot_cv_histogram(cv, model_type, molecule, img_dir, date=None):
         ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(os.path.join(img_dir, f"{filename}.png"), dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
         plt.close()
 
 def plot_bond_analysis(cv, pos_torch, tica_wrapper, molecule, model_type, img_dir, date=None):
@@ -480,12 +683,12 @@ def plot_bond_analysis(cv, pos_torch, tica_wrapper, molecule, model_type, img_di
             filename += f"_{date}"
             
         if check_image_exists(img_dir, filename):
-            print(f"Skipping {filename}.png - already exists")
+            print(f"> Skipping {filename}.png - already exists")
             continue
-        print(f"Plotting bond number analysis for {model_type} {molecule}")
+        print(f"> Plotting bond number analysis for {model_type} {molecule}")
         
         dummy_pdb = tica_wrapper.pdb
-        dummy_pdb.xyz = pos_torch.numpy()
+        dummy_pdb.xyz = pos_torch.cpu().detach().numpy()
         label, bond_num = foldedness_by_hbond(dummy_pdb)
             
         fig = plt.figure(figsize=(7, 6))
@@ -507,7 +710,7 @@ def plot_bond_analysis(cv, pos_torch, tica_wrapper, molecule, model_type, img_di
         ax.set_ylabel("CV")
         ax.set_title(f"CV {cv_dim} vs Bond Number - {model_type.upper()}")
         
-        plt.savefig(os.path.join(img_dir, f"{filename}.png"), dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
         plt.close()
 
 def plot_committor_analysis(cv, cad_torch, committor_model, model_type, molecule, img_dir, date=None):
@@ -520,9 +723,9 @@ def plot_committor_analysis(cv, cad_torch, committor_model, model_type, molecule
             filename += f"_{date}"
             
         if check_image_exists(img_dir, filename):
-            print(f"Skipping {filename}.png - already exists")
+            print(f"> Skipping {filename}.png - already exists")
             continue
-        print(f"Plotting committor analysis for {model_type} {molecule}")
+        print(f"> Plotting committor analysis for {model_type} {molecule}")
         committor_value = committor_model(cad_torch.to(CUDA_DEVICE))
         committor_value = committor_value.cpu().detach().numpy().flatten()
             
@@ -543,7 +746,7 @@ def plot_committor_analysis(cv, cad_torch, committor_model, model_type, molecule
         ax.set_ylabel(f"CV {cv_dim}")
         ax.set_title(f"CV {cv_dim} vs Committor - {model_type.upper()}")
         
-        plt.savefig(os.path.join(img_dir, f"{filename}.png"), dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
         plt.close()
 
 def plot_rmsd_analysis(cv, molecule, model_type, img_dir, date=None):
@@ -556,9 +759,9 @@ def plot_rmsd_analysis(cv, molecule, model_type, img_dir, date=None):
             filename += f"_{date}"
             
         if check_image_exists(img_dir, filename):
-            print(f"Skipping {filename}.png - already exists")
+            print(f"> Skipping {filename}.png - already exists")
             continue
-        print(f"Plotting RMSD vs CV analysis for {model_type} {molecule}")
+        print(f"> Plotting RMSD vs CV analysis for {model_type} {molecule}")
         rmsd_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-rmsd.pt"
         if not os.path.exists(rmsd_path):
             print(f"RMSD data not found at {rmsd_path}")
@@ -581,7 +784,339 @@ def plot_rmsd_analysis(cv, molecule, model_type, img_dir, date=None):
         ax.set_ylabel(f"CV {cv_dim}")
         ax.set_title(f"CV {cv_dim} vs RMSD to folded state - {model_type.upper()}")
         
-        plt.savefig(os.path.join(img_dir, f"{filename}.png"), dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        plt.close()
+
+def plot_dssp_full_violin_analysis(cv, dssp_data, model_type, img_dir, date=None):
+    """Plot violin plots for CV distribution by full DSSP secondary structure."""
+    os.makedirs(img_dir, exist_ok=True)
+    MLCV_DIM = cv.shape[1]
+    
+    # Get DSSP full data
+    dssp_full = dssp_data['dssp_full']
+    residue_indices = dssp_data['residue_indices']
+    
+    if dssp_full is None:
+        print("DSSP full data not available, skipping violin analysis")
+        return
+    
+    for cv_dim in range(MLCV_DIM):
+        filename = f"dssp-full-violin-cv{cv_dim}-{model_type}"
+        if date:
+            filename += f"_{date}"
+            
+        if check_image_exists(img_dir, filename):
+            print(f"> Skipping {filename}.png - already exists")
+            continue
+            
+        print(f"> Plotting DSSP full violin analysis for {model_type}")
+        
+        # Collect CV values for each secondary structure type
+        ss_types = np.unique(dssp_full)
+        ss_cv_data = {}
+        
+        for ss_type in ss_types:
+            cv_values = []
+            for frame_idx in range(len(dssp_full)):
+                for res_idx in range(dssp_full.shape[1]):
+                    if dssp_full[frame_idx, res_idx] == ss_type:
+                        cv_values.append(cv[frame_idx, cv_dim])
+            
+            if len(cv_values) > 100:  # Minimum threshold for meaningful distribution
+                ss_cv_data[ss_type] = np.array(cv_values)
+        
+        if len(ss_cv_data) < 2:
+            print(f"Not enough secondary structure types for violin plot")
+            continue
+        
+        # Create violin plot
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        # Prepare data for violin plot
+        violin_data = []
+        violin_labels = []
+        
+        for ss_type in sorted(ss_cv_data.keys()):
+            violin_data.append(ss_cv_data[ss_type])
+            ss_name = 'Coil' if ss_type == ' ' else f'SS-{ss_type}'
+            violin_labels.append(ss_name)
+        
+        # Create violin plot
+        violin_parts = ax.violinplot(
+            violin_data, positions=range(len(violin_data)), 
+            showmeans=True, showmedians=True, showextrema=True,
+        )
+        
+        # Customize violin plot
+        for i, body in enumerate(violin_parts['bodies']):
+            body.set_facecolor(colors[i % len(colors)])
+            body.set_alpha(0.7)
+        violin_parts['cbars'].set_edgecolor('gray')
+        violin_parts['cbars'].set_linewidth(2)
+        violin_parts['cbars'].set_alpha(1)
+        violin_parts['cmaxes'].set_edgecolor('gray')
+        violin_parts['cmaxes'].set_linewidth(2)
+        violin_parts['cmaxes'].set_alpha(1)
+        violin_parts['cmins'].set_edgecolor('gray')
+        violin_parts['cmins'].set_linewidth(2)
+        violin_parts['cmins'].set_alpha(1)
+        violin_parts['cmeans'].set_edgecolor('black')
+        violin_parts['cmeans'].set_linewidth(2)
+        violin_parts['cmeans'].set_alpha(0.5)
+        violin_parts['cmedians'].set_linewidth(0)
+        
+        ax.set_xticks(range(len(violin_labels)))
+        ax.set_xticklabels(violin_labels, rotation=45)
+        ax.set_ylabel(f'CV {cv_dim} Values')
+        ax.set_title(f'CV {cv_dim} Distribution by DSSP Full Secondary Structure - {model_type.upper()}')
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        plt.close()
+
+def plot_dssp_simplified_violin_analysis(cv, dssp_data, model_type, img_dir, date=None):
+    """Plot violin plots for CV distribution by simplified DSSP secondary structure."""
+    os.makedirs(img_dir, exist_ok=True)
+    MLCV_DIM = cv.shape[1]
+    
+    # Get DSSP simplified data
+    dssp_simplified = dssp_data['dssp_simplified']
+    residue_indices = dssp_data['residue_indices']
+    
+    if dssp_simplified is None:
+        print("DSSP simplified data not available, skipping simplified violin analysis")
+        return
+    
+    for cv_dim in range(MLCV_DIM):
+        filename = f"dssp-simplified-violin-cv{cv_dim}-{model_type}"
+        if date:
+            filename += f"_{date}"
+            
+        if check_image_exists(img_dir, filename):
+            print(f"> Skipping {filename}.png - already exists")
+            continue
+            
+        print(f"> Plotting DSSP simplified violin analysis for {model_type}")
+        
+        # Collect CV values for each secondary structure type
+        ss_types = np.unique(dssp_simplified)
+        ss_cv_data = {}
+        
+        for ss_type in ss_types:
+            cv_values = []
+            for frame_idx in range(len(dssp_simplified)):
+                for res_idx in range(dssp_simplified.shape[1]):
+                    if dssp_simplified[frame_idx, res_idx] == ss_type:
+                        cv_values.append(cv[frame_idx, cv_dim])
+            
+            if len(cv_values) > 100:  # Minimum threshold for meaningful distribution
+                ss_cv_data[ss_type] = np.array(cv_values)
+        
+        if len(ss_cv_data) < 2:
+            print(f"Not enough secondary structure types for violin plot")
+            continue
+        
+        # Create violin plot
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        # Prepare data for violin plot
+        violin_data = []
+        violin_labels = []
+        
+        for ss_type in sorted(ss_cv_data.keys()):
+            violin_data.append(ss_cv_data[ss_type])
+            violin_labels.append(ss_type)  # Simplified DSSP already has simple labels
+        
+        # Create violin plot
+        violin_parts = ax.violinplot(violin_data, positions=range(len(violin_data)), 
+                                   showmeans=True, showmedians=True, showextrema=True)
+        
+        # Customize violin plot
+        colors = plt.cm.Set3(np.linspace(0, 1, len(violin_data)))
+        for i, pc in enumerate(violin_parts['bodies']):
+            pc.set_facecolor(colors[i])
+            pc.set_alpha(0.7)
+        
+        ax.set_xticks(range(len(violin_labels)))
+        ax.set_xticklabels(violin_labels, rotation=45)
+        ax.set_ylabel(f'CV {cv_dim} Values')
+        ax.set_title(f'CV {cv_dim} Distribution by DSSP Simplified Secondary Structure - {model_type.upper()}')
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        plt.close()
+
+def plot_dssp_cv_heatmap(cv, dssp_data, model_type, img_dir, date=None):
+    """Plot heatmap for mean CV values by secondary structure and residue position."""
+    os.makedirs(img_dir, exist_ok=True)
+    MLCV_DIM = cv.shape[1]
+    
+    # Get DSSP data
+    dssp_full = dssp_data['dssp_full']
+    dssp_simplified = dssp_data['dssp_simplified']
+    residue_indices = dssp_data['residue_indices']
+    
+    # Create list of available DSSP types
+    dssp_types = []
+    if dssp_full is not None:
+        dssp_types.append(('full', dssp_full))
+    if dssp_simplified is not None:
+        dssp_types.append(('simplified', dssp_simplified))
+    
+    if not dssp_types:
+        print("No DSSP data available, skipping CV heatmap analysis")
+        return
+    
+    for cv_dim in range(MLCV_DIM):
+        for dssp_type, dssp_array in dssp_types:
+            if dssp_array is None:
+                continue
+                
+            filename = f"dssp-{dssp_type}-cv-heatmap-cv{cv_dim}-{model_type}"
+            if date:
+                filename += f"_{date}"
+                
+            # Check for both PNG and PDF extensions
+            if check_image_exists(img_dir, filename) or os.path.exists(os.path.join(img_dir, f"{filename}.pdf")):
+                print(f"> Skipping {filename}.pdf - already exists")
+                continue
+                
+            print(f"> Plotting DSSP {dssp_type} CV heatmap for {model_type}")
+            
+            # Get unique secondary structure types
+            ss_types = np.unique(dssp_array)
+            residue_range = range(dssp_array.shape[1])
+            
+            # Create heatmap data
+            heatmap_data = np.full((len(ss_types), len(residue_range)), np.nan)
+            ss_type_labels = []
+            
+            for ss_idx, ss_type in enumerate(ss_types):
+                ss_name = 'Coil' if ss_type == ' ' else f'SS-{ss_type}' if dssp_type == 'full' else ss_type
+                ss_type_labels.append(ss_name)
+                
+                for res_idx in residue_range:
+                    # Collect CV values for this residue when it has this secondary structure
+                    cv_values_for_residue = []
+                    
+                    for frame_idx in range(len(dssp_array)):
+                        if dssp_array[frame_idx, res_idx] == ss_type:
+                            cv_values_for_residue.append(cv[frame_idx, cv_dim])
+                    
+                    if len(cv_values_for_residue) > 10:  # Minimum threshold for meaningful average
+                        heatmap_data[ss_idx, res_idx] = np.mean(cv_values_for_residue)
+            
+            # Create the heatmap with reduced spacing
+            fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+            
+            # Plot mean CV values heatmap
+            im = ax.imshow(heatmap_data, aspect='auto', cmap='RdBu_r', interpolation='nearest')
+            ax.set_xlabel('Residue Index', fontsize=12)
+            ax.set_ylabel('Secondary Structure', fontsize=12)
+            ax.set_title(f'Mean CV {cv_dim} Values by DSSP {dssp_type.title()} Secondary Structure and Residue - {model_type.upper()}', fontsize=13)
+            ax.set_yticks(range(len(ss_type_labels)))
+            ax.set_yticklabels(ss_type_labels, fontsize=10)
+            
+            # Set x-axis labels to show actual residue numbers
+            if residue_indices is not None:
+                n_ticks = min(len(residue_indices), 10)  # Show max 10 ticks
+                tick_positions = np.linspace(0, len(residue_indices)-1, n_ticks, dtype=int)
+                tick_labels = [str(residue_indices[i]) for i in tick_positions]
+                ax.set_xticks(tick_positions)
+                ax.set_xticklabels(tick_labels, fontsize=10)
+            
+            # Add colorbar with reduced padding
+            cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+            cbar.set_label(f'Mean CV {cv_dim} Value', fontsize=11)
+            
+            # Save in both formats with tight layout and reduced spacing
+            plt.tight_layout(pad=0.5)
+            save_plot_dual_format(img_dir, filename, bbox_inches='tight', pad_inches=0.1)
+            plt.close()
+
+def plot_dssp_composition_heatmap(dssp_data, model_type, img_dir, date=None):
+    """Plot heatmap for secondary structure composition by residue position."""
+    os.makedirs(img_dir, exist_ok=True)
+    
+    # Get DSSP data
+    dssp_full = dssp_data['dssp_full']
+    dssp_simplified = dssp_data['dssp_simplified']
+    residue_indices = dssp_data['residue_indices']
+    
+    # Create list of available DSSP types
+    dssp_types = []
+    if dssp_full is not None:
+        dssp_types.append(('full', dssp_full))
+    if dssp_simplified is not None:
+        dssp_types.append(('simplified', dssp_simplified))
+    
+    if not dssp_types:
+        print("No DSSP data available, skipping composition heatmap analysis")
+        return
+    
+    for dssp_type, dssp_array in dssp_types:
+        if dssp_array is None:
+            continue
+            
+        filename = f"dssp-{dssp_type}-composition-heatmap-{model_type}"
+        if date:
+            filename += f"_{date}"
+            
+        # Check for both PNG and PDF extensions
+        if check_image_exists(img_dir, filename) or os.path.exists(os.path.join(img_dir, f"{filename}.pdf")):
+            print(f"> Skipping {filename}.pdf - already exists")
+            continue
+            
+        print(f"> Plotting DSSP {dssp_type} composition heatmap for {model_type}")
+        
+        # Get unique secondary structure types
+        ss_types = np.unique(dssp_array)
+        ss_type_labels = []
+        
+        for ss_type in ss_types:
+            ss_name = 'Coil' if ss_type == ' ' else f'SS-{ss_type}' if dssp_type == 'full' else ss_type
+            ss_type_labels.append(ss_name)
+        
+        # Create secondary structure composition data
+        ss_composition = np.zeros((len(ss_types), dssp_array.shape[1]))
+        
+        for res_idx in range(dssp_array.shape[1]):
+            for frame_idx in range(len(dssp_array)):
+                ss_type = dssp_array[frame_idx, res_idx]
+                ss_idx = list(ss_types).index(ss_type)
+                ss_composition[ss_idx, res_idx] += 1
+        
+        # Normalize to get proportions
+        ss_composition = ss_composition / len(dssp_array)
+        
+        # Create the heatmap with reduced spacing
+        fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+        
+        # Plot composition
+        im = ax.imshow(ss_composition, aspect='auto', cmap='viridis', interpolation='nearest')
+        ax.set_xlabel('Residue Index', fontsize=12)
+        ax.set_ylabel('Secondary Structure', fontsize=12)
+        ax.set_title(f'DSSP {dssp_type.title()} Secondary Structure Composition by Residue - {model_type.upper()}', fontsize=13)
+        ax.set_yticks(range(len(ss_type_labels)))
+        ax.set_yticklabels(ss_type_labels, fontsize=10)
+        
+        # Set x-axis labels to show actual residue numbers
+        if residue_indices is not None:
+            n_ticks = min(len(residue_indices), 10)  # Show max 10 ticks
+            tick_positions = np.linspace(0, len(residue_indices)-1, n_ticks, dtype=int)
+            tick_labels = [str(residue_indices[i]) for i in tick_positions]
+            ax.set_xticks(tick_positions)
+            ax.set_xticklabels(tick_labels, fontsize=10)
+        
+        # Add colorbar with reduced padding
+        cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+        cbar.set_label('Proportion of Frames', fontsize=11)
+        
+        # Save in both formats with tight layout and reduced spacing
+        plt.tight_layout(pad=0.5)
+        save_plot_dual_format(img_dir, filename, bbox_inches='tight', pad_inches=0.1)
         plt.close()
 
 def analyze_correlations(cv, committor_value, tica_data, bond_num, molecule, model_type):
@@ -624,7 +1159,7 @@ def analyze_correlations(cv, committor_value, tica_data, bond_num, molecule, mod
 
 def main():
     parser = argparse.ArgumentParser(description='Run CV analysis for different model types')
-    parser.add_argument('--model_type', choices=['mlcv', 'tda', 'tica', 'tae', 'vde', 'all'], default='all',
+    parser.add_argument('--model_type', choices=['mlcv', 'mlcv-trans', 'tda', 'tica', 'tae', 'vde', 'all'], default='all',
                         help='Model type to analyze')
     parser.add_argument('--molecule', choices=['CLN025', '2JOF', '2F4K'], default='CLN025',
                         help='Molecule to analyze')
@@ -632,8 +1167,16 @@ def main():
                         help='Date string for MLCV model (only used for mlcv)')
     parser.add_argument('--img_dir', type=str, default='/home/shpark/prj-mlcv/lib/bioemu/img',
                         help='Directory to save images')
+    parser.add_argument('--cuda_device', type=int, default=None,
+                        help='CUDA device ID to use (e.g., 0, 1). If not specified, auto-detect available device')
     
     args = parser.parse_args()
+    
+    # Override global CUDA_DEVICE if specified
+    global CUDA_DEVICE
+    if args.cuda_device is not None:
+        CUDA_DEVICE = args.cuda_device
+        print(f"Using specified CUDA device: cuda:{CUDA_DEVICE}")
     
     # Create image directory if it doesn't exist
     os.makedirs(args.img_dir, exist_ok=True)
@@ -641,73 +1184,85 @@ def main():
     model_types = ['mlcv', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
     
     for model_type in model_types:
-        try:
-            print(f"\n{'='*60}")
-            print(f"Running analysis for {model_type.upper()} - {args.molecule}")
-            print(f"{'='*60}")
-            
-            # Load model and data
-            mlcv_model, tica_wrapper, committor_model, pos_torch, cad_torch, cad_switch_torch = load_model_and_data(
-                model_type, args.molecule, args.date
-            )
-            
-            # Load reference structure
-            reference_pdb_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{args.molecule}/folded.pdb"
-            reference_cad = None
-            if args.molecule in ["CLN025","2JOF","2F4K"] and os.path.exists(reference_pdb_path):
-                reference_cad = load_reference_structure(reference_pdb_path, tica_wrapper)
-                print(f"Loaded reference structure from {reference_pdb_path}")
-            else:
-                print(f"Reference structure not given, CV sign not aligned")
-            
-            # Compute CV values
-            cv = compute_cv_values(mlcv_model, cad_torch, model_type, reference_cad)
-            print(f"CV shape: {cv.shape}")
-            print(f"CV range: {cv.max():.4f} to {cv.min():.4f}")
-            
-            # Compute TICA coordinates
-            if args.molecule == "CLN025":
-                tica_data = tica_wrapper.transform(cad_switch_torch.numpy())
-            else:
-                tica_data = tica_wrapper.transform(cad_torch.numpy())
-            print(f"TICA shape: {tica_data.shape}")
-            
-            # Plot TICA-CV analysis
-            plot_tica_cv_analysis(cv, tica_data, model_type, args.molecule, args.img_dir, args.date)
-            
-            # Plot CV-TICA analysis (2D histogram with CV as axes, TICA as colors)
-            plot_cv_tica_analysis(cv, tica_data, model_type, args.molecule, args.img_dir, args.date)
-            
-            # Plot CV histogram
-            plot_cv_histogram(cv, model_type, args.molecule, args.img_dir, args.date)
-            
-            # Bond analysis (only for CLN025)
-            bond_num = None
-            if args.molecule == "CLN025":
-                plot_bond_analysis(cv, pos_torch, tica_wrapper, args.molecule, model_type, args.img_dir, args.date)
-                # Get bond numbers for correlation analysis
-                dummy_pdb = tica_wrapper.pdb
-                dummy_pdb.xyz = pos_torch.numpy()
-                _, bond_num = foldedness_by_hbond(dummy_pdb)
-            
-            # Committor analysis
-            if args.molecule == "CLN025":
-                plot_committor_analysis(cv, cad_torch, committor_model, model_type, args.molecule, args.img_dir, args.date)
-            
-            # RMSD analysis
-            plot_rmsd_analysis(cv, args.molecule, model_type, args.img_dir, args.date)
-            
-            # Correlation analysis
-            if args.molecule == "CLN025":
-                committor_value = committor_model(cad_torch.to(CUDA_DEVICE))
-                committor_value = committor_value.cpu().detach().numpy().flatten()
-                analyze_correlations(cv, committor_value, tica_data, bond_num, args.molecule, model_type)
-            
-                print(f"\nCompleted analysis for {model_type.upper()}. Plots saved to {os.path.join(args.img_dir, args.molecule)}")
+        # try:
+        print(f"\n{'='*60}")
+        print(f"Running analysis for {model_type.upper()} - {args.molecule}")
+        print(f"{'='*60}")
+        
+        # Load model and data
+        mlcv_model, tica_wrapper, committor_model, pos_torch, cad_torch, cad_switch_torch = load_model_and_data(
+            model_type, args.molecule, args.date
+        )
+        
+        # Load reference structure
+        reference_pdb_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{args.molecule}/folded.pdb"
+        reference_cad = None
+        if args.molecule in ["CLN025","2JOF","2F4K"] and os.path.exists(reference_pdb_path):
+            reference_cad = load_reference_structure(reference_pdb_path, tica_wrapper)
+            print(f"Loaded reference structure from {reference_pdb_path}")
+        else:
+            print(f"Reference structure not given, CV sign not aligned")
+        
+        # Compute CV values using batch processing
+        cv = compute_cv_values(mlcv_model, cad_torch, model_type, reference_cad, batch_size=10000)
+        print(f"CV shape: {cv.shape}")
+        print(f"CV range: {cv.max():.4f} to {cv.min():.4f}")
+        
+        # Compute TICA coordinates
+        if args.molecule == "CLN025":
+            if cad_switch_torch.device.type == "cuda":
+                cad_switch_torch = cad_switch_torch.cpu()
+            tica_data = tica_wrapper.transform(cad_switch_torch.numpy())
+        else:
+            if cad_torch.device.type == "cuda":
+                cad_torch = cad_torch.cpu()
+            tica_data = tica_wrapper.transform(cad_torch.numpy())
+        print(f"TICA shape: {tica_data.shape}")
+        
+        # Plot TICA-CV analysis
+        plot_tica_cv_analysis(cv, tica_data, model_type, args.molecule, args.img_dir, args.date)
+        
+        # Plot CV-TICA analysis (2D histogram with CV as axes, TICA as colors)
+        plot_cv_tica_analysis(cv, tica_data, model_type, args.molecule, args.img_dir, args.date)
+        
+        # Plot CV histogram
+        plot_cv_histogram(cv, model_type, args.molecule, args.img_dir, args.date)
+        
+        # Bond analysis (only for CLN025)
+        bond_num = None
+        if args.molecule == "CLN025":
+            plot_bond_analysis(cv, pos_torch, tica_wrapper, args.molecule, model_type, args.img_dir, args.date)
+            # Get bond numbers for correlation analysis
+            dummy_pdb = tica_wrapper.pdb
+            dummy_pdb.xyz = pos_torch.cpu().detach().numpy()
+            _, bond_num = foldedness_by_hbond(dummy_pdb)
+        
+        # Committor analysis
+        if args.molecule == "CLN025":
+            plot_committor_analysis(cv, cad_torch, committor_model, model_type, args.molecule, args.img_dir, args.date)
+        
+        # RMSD analysis
+        plot_rmsd_analysis(cv, args.molecule, model_type, args.img_dir, args.date)
+        
+        # DSSP analysis - load and filter data once
+        print(f"\nLoading DSSP data for {args.molecule}...")
+        dssp_data = load_and_filter_dssp_data(args.molecule)
+        plot_dssp_full_violin_analysis(cv, dssp_data, model_type, args.img_dir, args.date)
+        plot_dssp_simplified_violin_analysis(cv, dssp_data, model_type, args.img_dir, args.date)
+        plot_dssp_cv_heatmap(cv, dssp_data, model_type, args.img_dir, args.date)
+        plot_dssp_composition_heatmap(dssp_data, model_type, args.img_dir, args.date)
+        
+        # Correlation analysis
+        if args.molecule == "CLN025":
+            committor_value = committor_model(cad_torch.to(CUDA_DEVICE))
+            committor_value = committor_value.cpu().detach().numpy().flatten()
+            analyze_correlations(cv, committor_value, tica_data, bond_num, args.molecule, model_type)
+        
+        print(f"\nCompleted analysis for {model_type.upper()}. Plots saved to {os.path.join(args.img_dir, args.molecule)}")
     
-        except Exception as e:
-            print(f"Error during analysis for {model_type.upper()}: {e}")
-            continue
+        # except Exception as e:
+        #     print(f"Error during analysis for {model_type.upper()}: {e}")
+        #     continue
 
 if __name__ == "__main__":
     main()

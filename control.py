@@ -11,8 +11,8 @@ from pathlib import Path
 from torch_geometric.data import Batch
 from tqdm import tqdm
 from omegaconf import OmegaConf,open_dict
-
-from torch.utils.data import DataLoader
+from pytorch_lightning import Trainer
+from torch.utils.data import DataLoader, TensorDataset
 
 from bioemu.chemgraph import ChemGraph
 from bioemu.sample import get_context_chemgraph
@@ -79,7 +79,7 @@ class PostProcess(Transform):
 # rollout_config_path = "/home/shpark/prj-mlcv/lib/bioemu/notebook/rollout.yaml"
 # OUTPUT_DIR = Path("~/prj-mlcv/lib/bioemu/ppft_example_output").expanduser()
 # OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-cln025_alpha_carbon_idx = [4, 25, 46, 60, 72, 87, 101, 108, 122, 146]
+# cln025_alpha_carbon_idx = [4, 25, 46, 60, 72, 87, 101, 108, 122, 146]
     
     
 def kabsch_rmsd(
@@ -689,23 +689,41 @@ def add_postprocessing_module(mlcv_model: torch.nn.Module, dataset: torch.utils.
             all_data.append(batch["current_data"])
         projection_data = torch.cat(all_data, dim=0).to(device)
     
-    # Evaluate model on full dataset
+    # Evaluate model on full dataset using batch processing
     mlcv_model.eval()
-    with torch.no_grad():
-        cv = mlcv_model(projection_data)
-        cv_numpy = cv.detach().cpu().numpy()
+    batch_size = 10000
+    print(f"Computing CV values for post-processing in batches of {batch_size}...")
+    dataset = TensorDataset(projection_data)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     
+    # Get output dimension from a sample
+    with torch.no_grad():
+        sample_batch = next(iter(dataloader))[0]
+        sample_output = mlcv_model(sample_batch)
+        output_dim = sample_output.shape[1]
+    cv_batches = torch.zeros((len(projection_data), output_dim)).to(projection_data.device)
+    
+    with torch.no_grad():
+        for batch_idx, (batch_data,) in enumerate(tqdm(
+            dataloader,
+            desc="Computing CV values for post-processing",
+            total=len(dataloader),
+            leave=False,
+        )):
+            batch_cv = mlcv_model(batch_data)
+            start_idx = batch_idx * batch_size
+            end_idx = start_idx + batch_cv.shape[0]  # Handle last batch size correctly
+            cv_batches[start_idx:end_idx] = batch_cv
+    
+    cv = cv_batches
     print(f"CV shape: {cv.shape}")
     print(f"CV range: [{cv.min():.6f}, {cv.max():.6f}]")
     
-    # Compute statistics for post-processing
+    # Data for post-processing
     stats = Statistics(cv.cpu()).to_dict()
-    
-    # Handle reference frame for sign flipping (optional)
     reference_frame_cv = None
     if reference_frame_path and os.path.exists(reference_frame_path):
         try:
-            import mdtraj as md
             ref_traj = md.load(reference_frame_path)
             ref_pos = ref_traj.xyz[0]  # Get first (and only) frame
             
@@ -737,10 +755,24 @@ def add_postprocessing_module(mlcv_model: torch.nn.Module, dataset: torch.utils.
     # Attach to model
     mlcv_model.postprocessing = postprocessing
     
-    # Test post-processed output
+    # Test post-processed output using batch processing
+    print("Testing post-processed output...")
+    postprocessed_cv_batches = torch.zeros((len(projection_data), output_dim)).to(projection_data.device)
+    
     with torch.no_grad():
-        postprocessed_cv = mlcv_model(projection_data)
-        print(f"Post-processed CV range: [{postprocessed_cv.min():.6f}, {postprocessed_cv.max():.6f}]")
+        for batch_idx, (batch_data,) in enumerate(tqdm(
+            dataloader,
+            desc="Testing post-processed CV",
+            total=len(dataloader),
+            leave=False,
+        )):
+            batch_postprocessed_cv = mlcv_model(batch_data)
+            start_idx = batch_idx * batch_size
+            end_idx = start_idx + batch_postprocessed_cv.shape[0]
+            postprocessed_cv_batches[start_idx:end_idx] = batch_postprocessed_cv
+    
+    postprocessed_cv = postprocessed_cv_batches
+    print(f"Post-processed CV range: [{postprocessed_cv.min():.6f}, {postprocessed_cv.max():.6f}]")
     
     # Log post-processing statistics to wandb
     postprocessing_stats = {
@@ -778,7 +810,7 @@ def main(cfg):
     seed = cfg.model.training.seed
     torch.manual_seed(seed)
     
-    # NOTE: Set logging
+    # Set logging
     date = cfg.log.date
     if date == "debug":
         pass
@@ -799,7 +831,7 @@ def main(cfg):
         )
     )
     
-    # NOTE: score model
+    # score model
     ckpt_path = cfg.model.score_model.ckpt_path
     cfg_path = cfg.model.score_model.cfg_path
     with open(cfg_path) as f:
@@ -836,7 +868,7 @@ def main(cfg):
         # score_model.model_nn.st_module._debug_conditioning = True
         
     
-    # NOTE: add zero conv MLP to score model
+    # add zero conv MLP to score model
     if cfg.model.mlcv_model.condition_mode in ["backbone", "backbone-both"]:
         hidden_dim = 3
     elif cfg.model.mlcv_model.condition_mode in ["input", "latent", "input-control"]:
@@ -915,7 +947,7 @@ def main(cfg):
             )
     
     
-    # NOTE: MLCV model
+    # MLCV model
     method = cfg.model.mlcv_model.name
     if method == "ours":
         mlcv_model = load_ours(
@@ -923,6 +955,7 @@ def main(cfg):
             mlcv_dim=cfg.model.mlcv_model.mlcv_dim,
             dim_normalization=cfg.model.mlcv_model.dim_normalization,
             normalization_factor=cfg.model.mlcv_model.normalization_factor,
+            transferable=cfg.model.mlcv_model.transferable,
         ).to(device)
     elif method in ["tda","tae", "vde"]:
         mlcv_model = load_baseline(
@@ -951,7 +984,7 @@ def main(cfg):
         watch_param_list = watch_param_list + list(zero_conv_mlp.parameters())
     
     
-    # NOTE: Load training
+    # Load training
     mid_t = cfg.model.rollout.mid_t
     N_rollout = cfg.model.rollout.N_rollout
     record_grad_steps = cfg.model.rollout.record_grad_steps
@@ -980,7 +1013,7 @@ def main(cfg):
     else:
         raise ValueError(f"Scheduler {scheduler_name} not supported")
     
-    # NOTE: Load data
+    # Load data
     dataset = TimelagDataset(
         cfg_data = cfg.data,
         device=device,
@@ -997,7 +1030,7 @@ def main(cfg):
     )
     num_batches = len(dataloader)
 
-    # NOTE: Training loop
+    # Training loop
     training_method = getattr(cfg.model.training, 'method', 'ppft')
     enable_loss_clipping = getattr(cfg.model.training, 'enable_loss_clipping', True)
     max_loss_value = getattr(cfg.model.training, 'max_loss_value', 100.0)
@@ -1026,17 +1059,14 @@ def main(cfg):
         desc=f"Loss: x.xxxxxx",
         total=num_epochs,
     )
-    spike_rate_history = []
     total_clips = 0
     clips_per_epoch = []
     
     for epoch in pbar:
         total_loss = 0
-        current_structure_metrics = {}  # Initialize structure metrics for this epoch
         epoch_clips = 0  # Track clipping events this epoch
         
         # Loss spike debugging
-        batch_losses = []
         batch_mlcv_stats = []
         batch_structure_stats = []
 
@@ -1237,10 +1267,14 @@ def main(cfg):
         }
     }, f"model/{cfg.log.date}/final_model.pt")    
     
-    # Save mlcv model with post-processing
+    # Save mlcv model (with post-processing)
     torch.save({
         'mlcv_state_dict': mlcv_model.state_dict(),
     }, f"model/{cfg.log.date}/mlcv_model.pt")
+    mlcv_model.trainer = Trainer(logger=False, enable_checkpointing=False, enable_model_summary=False)
+    dummy_input = torch.randn(1, current_data.shape[1]).to(device)
+    traced_model = torch.jit.trace(mlcv_model, dummy_input)
+    traced_model.save(f"model/{cfg.log.date}/mlcv_model-jit.pt")
     
     run.finish()
     

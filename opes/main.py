@@ -111,7 +111,7 @@ class OPESSimulationRunner:
             "-nsteps", str(self.step),
             "-ntomp", "1",
             "-nb", "gpu",
-            "-bonded", "gpu"
+            "-bonded", "gpu",
         ]
         
         env = os.environ.copy()

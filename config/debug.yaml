@@ -1,0 +1,5 @@
+defaults:
+- data: CLN025-cad-pos
+- log: basic
+- model: input-transferable
+- sample: basic

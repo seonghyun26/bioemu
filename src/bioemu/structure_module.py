@@ -54,7 +54,6 @@ class DiffHead(nn.Module):
 
 
 class SAAttention(nn.Module):
-    # NOTE: here
     """DiG version of the invariant point attention module. See AF2 supplement Alg 22.
     I believe SA might stand for "Structural Attention", see App B.3 in the DiG paper.
 
