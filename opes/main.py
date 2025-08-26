@@ -356,7 +356,7 @@ class OPESSimulationRunner:
         
         try:
             # Load reference structure
-            ref_pdb_path = f"/opes/data/{self.molecule.upper()}/folded.pdb"
+            ref_pdb_path = f"./data/{self.molecule.upper()}/folded.pdb"
             ref_traj = md.load_pdb(ref_pdb_path)
             
             # Collect RMSD data from all seeds
@@ -508,11 +508,11 @@ class OPESSimulationRunner:
         try:
             # Load TICA model
             if self.molecule == "cln025":
-                tica_model_path = f"/opes/data/{self.molecule.upper()}/{self.molecule.upper()}_tica_model_switch_lag10.pkl"
-                cad_full_path = f"/opes/dataset/{self.molecule.upper()}-all/cad-switch.pt"
+                tica_model_path = f"./data/{self.molecule.upper()}/{self.molecule.upper()}_tica_model_switch_lag10.pkl"
+                cad_full_path = f"./dataset/{self.molecule.upper()}-all/cad-switch.pt"
             else:
-                tica_model_path = f"/opes/data/{self.molecule.upper()}/{self.molecule.upper()}_tica_model_lag10.pkl"
-                cad_full_path = f"/opes/dataset/{self.molecule.upper()}-all/cad.pt"
+                tica_model_path = f"./data/{self.molecule.upper()}/{self.molecule.upper()}_tica_model_lag10.pkl"
+                cad_full_path = f"./dataset/{self.molecule.upper()}-all/cad.pt"
                 
             with open(tica_model_path, 'rb') as f:
                 tica_model = pickle.load(f)
@@ -543,7 +543,7 @@ class OPESSimulationRunner:
                     continue
                 
                 # Load topology
-                top_file = f"/opes/data/{self.molecule.upper()}/{self.molecule.upper()}_from_mae.pdb"
+                top_file = f"./data/{self.molecule.upper()}/{self.molecule.upper()}_from_mae.pdb"
                 if not Path(top_file).exists():
                     logger.warning(f"Topology file not found: {top_file}")
                     continue
@@ -617,7 +617,7 @@ class OPESSimulationRunner:
         
         try:
             # Load TDA model
-            model_path = f"/opes/model/_baseline_/tda-{self.molecule.upper()}-jit.pt"
+            model_path = f"./model/_baseline_/tda-{self.molecule.upper()}-jit.pt"
             if not Path(model_path).exists():
                 logger.warning(f"TDA model not found: {model_path}")
                 return
@@ -642,7 +642,7 @@ class OPESSimulationRunner:
                     continue
                 
                 # Load topology
-                top_file = f"/opes/data/{self.molecule.upper()}/{self.molecule.upper()}_from_mae.pdb"
+                top_file = f"./data/{self.molecule.upper()}/{self.molecule.upper()}_from_mae.pdb"
                 if not Path(top_file).exists():
                     continue
                 
