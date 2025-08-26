@@ -1,0 +1,5 @@
+defaults:
+- data: 2JOF-50k-cad-pos
+- log: basic
+- model: input-transferable-2jof
+- sample: basic

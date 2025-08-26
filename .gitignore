@@ -151,3 +151,4 @@ cython_debug/
 *opes/simulations*
 *COLVAR*
 *HILLS*
+*!model/_baseline_/*

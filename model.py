@@ -9,10 +9,58 @@ from torch.optim.lr_scheduler import _LRScheduler
 from torch.optim import Adam
 
 from mlcolvar.cvs import BaseCV, VariationalAutoEncoderCV
-from mlcolvar.core import FeedForward, Normalization
 from mlcolvar.core.loss.elbo import elbo_gaussians_loss
 from mlcolvar.core.transform import Transform
 import torch.nn.functional as F
+
+# Import residue constants for amino acid type encoding
+try:
+    from src.bioemu.openfold.np.residue_constants import (
+        restypes, restype_order, restype_num, sequence_to_onehot
+    )
+except ImportError:
+    # Fallback minimal implementation
+    restypes = ['A', 'R', 'N', 'D', 'C', 'Q', 'E', 'G', 'H', 'I', 'L', 'K', 'M', 'F', 'P', 'S', 'T', 'W', 'Y', 'V']
+    restype_order = {restype: i for i, restype in enumerate(restypes)}
+    restype_num = len(restypes)
+    
+    def sequence_to_onehot(sequence, mapping, map_unknown_to_x=False):
+        import numpy as np
+        num_entries = max(mapping.values()) + 1
+        one_hot_arr = np.zeros((len(sequence), num_entries), dtype=np.int32)
+        for aa_index, aa_type in enumerate(sequence):
+            if map_unknown_to_x:
+                aa_id = mapping.get(aa_type, 20)  # Unknown mapped to 20
+            else:
+                aa_id = mapping[aa_type]
+            one_hot_arr[aa_index, aa_id] = 1
+        return one_hot_arr
+
+
+def sequence_to_indices(sequence: str, mapping: dict = None) -> torch.Tensor:
+    """
+    Convert amino acid sequence to tensor of indices.
+    
+    Args:
+        sequence: Amino acid sequence string (e.g., "ACDEFG")
+        mapping: Dictionary mapping amino acids to indices. If None, uses default restype_order.
+        
+    Returns:
+        Tensor of amino acid indices [seq_len]
+    """
+    if mapping is None:
+        mapping = restype_order
+    
+    # Handle unknown amino acids by mapping to index 20
+    indices = []
+    for aa in sequence:
+        if aa in mapping:
+            indices.append(mapping[aa])
+        else:
+            indices.append(20)  # Unknown amino acid
+    
+    return torch.tensor(indices, dtype=torch.long)
+
 
 class FeedForward(nn.Module):
     """Standard single hidden layer MLP with dropout and GELU activations."""
@@ -308,10 +356,12 @@ class MLCV(BaseCV, lightning.LightningModule):
         options: dict = None,
         **kwargs,
     ):
+        
         super().__init__(in_features=encoder_layers[0], out_features=encoder_layers[-1], **kwargs)
         # ======= OPTIONS =======
         options = self.parse_options(options)
         
+        from mlcolvar.core import FeedForward, Normalization
         # ======= BLOCKS =======
         # initialize norm_in
         o = "norm_in"
@@ -362,6 +412,8 @@ class MLCV_TRANSFERABLE(BaseCV, lightning.LightningModule):
         input_type: str = "distances",
         coordinate_processing: str = "to_distances",
         lazy_pos_encoding: bool = False,
+        residue_based_encoding: bool = True,
+        aa_embedding_dim: int = 64,
         **kwargs,
     ):
         """
@@ -380,6 +432,8 @@ class MLCV_TRANSFERABLE(BaseCV, lightning.LightningModule):
             input_type: Type of input data - "distances" for pairwise distances or "coordinates" for 3D coordinates
             coordinate_processing: How to process coordinates - "to_distances" or "direct" (only used when input_type="coordinates")
             lazy_pos_encoding: Use lazy positional encoding (more memory efficient, slower for large sequences)
+            residue_based_encoding: Use residue-based positional encoding that incorporates amino acid type information
+            aa_embedding_dim: Dimension for amino acid type embeddings (only used when residue_based_encoding=True)
         """
         super().__init__(in_features=input_dim, out_features=mlcv_dim)
         
@@ -396,16 +450,24 @@ class MLCV_TRANSFERABLE(BaseCV, lightning.LightningModule):
         self.max_seq_len = max_seq_len
         self.input_type = input_type
         self.coordinate_processing = coordinate_processing
+        self.residue_based_encoding = residue_based_encoding
+        self.aa_embedding_dim = aa_embedding_dim
         
         # Input preprocessing layers
         self.distance_embedding = torch.nn.Linear(1, d_model)
         self.coordinate_embedding = torch.nn.Linear(3, d_model)  # For direct coordinate processing
         
         # Position encoding for distance matrix indices (optimized)
-        if lazy_pos_encoding:
-            self.pos_encoding = LazyPositionalEncodingMatrix(d_model, max_seq_len)
+        if residue_based_encoding:
+            if lazy_pos_encoding:
+                self.pos_encoding = LazyResidueBasedPositionalEncodingMatrix(d_model, max_seq_len, aa_embedding_dim)
+            else:
+                self.pos_encoding = ResidueBasedPositionalEncodingMatrix(d_model, max_seq_len, aa_embedding_dim)
         else:
-            self.pos_encoding = PositionalEncodingMatrix(d_model, max_seq_len)
+            if lazy_pos_encoding:
+                self.pos_encoding = LazyPositionalEncodingMatrix(d_model, max_seq_len)
+            else:
+                self.pos_encoding = PositionalEncodingMatrix(d_model, max_seq_len)
         
         # Initial projection to pair dimension 
         self.pair_projection = torch.nn.Linear(d_model, d_pair)
@@ -520,12 +582,13 @@ class MLCV_TRANSFERABLE(BaseCV, lightning.LightningModule):
         
         return x1d, x2d, mask
     
-    def cad_to_sequence_representation(self, cad_distances: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def cad_to_sequence_representation(self, cad_distances: torch.Tensor, aa_types: torch.Tensor = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Convert pairwise CA distances to sequence representation for SA layers.
         
         Args:
             cad_distances: [B, n_pairs] where n_pairs = n_residues * (n_residues - 1) / 2
+            aa_types: [B, L] tensor of amino acid type indices (0-20), optional
             
         Returns:
             x1d: [B, L, d_model] sequence representation
@@ -555,7 +618,11 @@ class MLCV_TRANSFERABLE(BaseCV, lightning.LightningModule):
                 idx += 1
         
         # Add positional encoding
-        pos_encoded = self.pos_encoding(n_residues)  # [L, L, d_model]
+        if self.residue_based_encoding and aa_types is not None:
+            # Use the first sample's aa_types for batch (assumes all samples have same sequence)
+            pos_encoded = self.pos_encoding(n_residues, aa_types[0] if aa_types.dim() > 1 else aa_types)  # [L, L, d_model]
+        else:
+            pos_encoded = self.pos_encoding(n_residues)  # [L, L, d_model]
         distance_matrix = distance_matrix + pos_encoded.unsqueeze(0)
         
         # Create sequence representation by averaging over pairs
@@ -569,12 +636,13 @@ class MLCV_TRANSFERABLE(BaseCV, lightning.LightningModule):
         
         return x1d, x2d, mask
     
-    def forward(self, input_data: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_data: torch.Tensor, aa_types: torch.Tensor = None) -> torch.Tensor:
         """
         Forward pass of transferable MLCV.
         
         Args:
             input_data: Either [B, n_pairs] pairwise distances or [B, N, 3] 3D coordinates
+            aa_types: [B, L] or [L] tensor of amino acid type indices (0-20), optional but recommended for residue-based encoding
             
         Returns:
             cv: [B, mlcv_dim] collective variables
@@ -591,7 +659,7 @@ class MLCV_TRANSFERABLE(BaseCV, lightning.LightningModule):
             elif self.coordinate_processing == "to_distances":
                 # Convert to distances first, then process
                 cad_distances = self.coordinates_to_distances(input_data)
-                x1d, x2d, mask = self.cad_to_sequence_representation(cad_distances)
+                x1d, x2d, mask = self.cad_to_sequence_representation(cad_distances, aa_types)
             else:
                 raise ValueError(f"Unknown coordinate_processing: {self.coordinate_processing}")
                 
@@ -599,7 +667,7 @@ class MLCV_TRANSFERABLE(BaseCV, lightning.LightningModule):
             # Input is already distances [B, n_pairs]
             if len(input_data.shape) != 2:
                 raise ValueError(f"For input_type='distances', expected shape [B, n_pairs], got {input_data.shape}")
-            x1d, x2d, mask = self.cad_to_sequence_representation(input_data)
+            x1d, x2d, mask = self.cad_to_sequence_representation(input_data, aa_types)
         else:
             raise ValueError(f"Unknown input_type: {self.input_type}")
         
@@ -632,9 +700,99 @@ class MLCV_TRANSFERABLE(BaseCV, lightning.LightningModule):
         return cv
 
 
+class ResidueBasedPositionalEncodingMatrix(torch.nn.Module):
+    """
+    Residue-based positional encoding for pairwise distance matrices.
+    
+    Encodes the relative positions (i, j) in the distance matrix along with
+    amino acid type information to help the model understand both spatial 
+    and chemical relationships.
+    """
+    
+    def __init__(self, d_model: int, max_len: int = 500, aa_embedding_dim: int = 64):
+        super().__init__()
+        self.d_model = d_model
+        self.max_len = max_len
+        self.aa_embedding_dim = aa_embedding_dim
+        
+        # Amino acid type embedding (21 types: 20 standard + 1 unknown)
+        self.aa_embedding = torch.nn.Embedding(21, aa_embedding_dim)
+        
+        # Positional encoding dimension (remaining space after aa embeddings)
+        self.pos_dim = d_model - aa_embedding_dim * 2  # *2 for both residues in pair
+        if self.pos_dim <= 0:
+            raise ValueError(f"d_model ({d_model}) must be larger than 2*aa_embedding_dim ({2*aa_embedding_dim})")
+        
+        # Create relative positional encoding matrix [max_len, max_len, pos_dim]
+        pe = torch.zeros(max_len, max_len, self.pos_dim)
+        
+        # Create position indices
+        positions_i = torch.arange(max_len, dtype=torch.float).unsqueeze(1).expand(max_len, max_len)
+        positions_j = torch.arange(max_len, dtype=torch.float).unsqueeze(0).expand(max_len, max_len)
+        rel_distances = torch.abs(positions_i - positions_j)
+        
+        # Create dimension indices for vectorized computation
+        dim_indices = torch.arange(0, self.pos_dim, 3, dtype=torch.float)
+        
+        # Vectorized sinusoidal encoding for positional information
+        for idx, k in enumerate(dim_indices):
+            k = int(k)
+            if k < self.pos_dim:
+                # Position i encoding
+                div_term_i = 10000 ** (k / self.pos_dim)
+                pe[:, :, k] = torch.sin(positions_i / div_term_i)
+                
+                if k + 1 < self.pos_dim:
+                    # Position j encoding
+                    div_term_j = 10000 ** ((k + 1) / self.pos_dim)
+                    pe[:, :, k + 1] = torch.sin(positions_j / div_term_j)
+                
+                if k + 2 < self.pos_dim:
+                    # Relative distance encoding
+                    div_term_rel = 10000 ** ((k + 2) / self.pos_dim)
+                    pe[:, :, k + 2] = torch.cos(rel_distances / div_term_rel)
+        
+        self.register_buffer('pe', pe)
+    
+    def forward(self, seq_len: int, aa_types: torch.Tensor = None) -> torch.Tensor:
+        """
+        Args:
+            seq_len: Sequence length
+            aa_types: [seq_len] tensor of amino acid type indices (0-20)
+            
+        Returns:
+            Positional encoding matrix [seq_len, seq_len, d_model]
+        """
+        device = self.pe.device
+        
+        # Get positional encoding
+        pos_encoding = self.pe[:seq_len, :seq_len, :]  # [seq_len, seq_len, pos_dim]
+        
+        if aa_types is not None:
+            # Ensure aa_types is on the correct device
+            if aa_types.device != device:
+                aa_types = aa_types.to(device)
+                
+            # Get amino acid embeddings
+            aa_embeds = self.aa_embedding(aa_types)  # [seq_len, aa_embedding_dim]
+            
+            # Create pairwise amino acid embeddings
+            aa_i = aa_embeds.unsqueeze(1).expand(seq_len, seq_len, self.aa_embedding_dim)  # [seq_len, seq_len, aa_embedding_dim]
+            aa_j = aa_embeds.unsqueeze(0).expand(seq_len, seq_len, self.aa_embedding_dim)  # [seq_len, seq_len, aa_embedding_dim]
+            
+            # Concatenate positional encoding with amino acid embeddings
+            full_encoding = torch.cat([pos_encoding, aa_i, aa_j], dim=-1)  # [seq_len, seq_len, d_model]
+        else:
+            # If no amino acid types provided, pad with zeros
+            aa_padding = torch.zeros(seq_len, seq_len, self.aa_embedding_dim * 2, device=device)
+            full_encoding = torch.cat([pos_encoding, aa_padding], dim=-1)
+        
+        return full_encoding
+
+
 class PositionalEncodingMatrix(torch.nn.Module):
     """
-    Positional encoding for pairwise distance matrices.
+    Original positional encoding for pairwise distance matrices.
     
     Encodes the relative positions (i, j) in the distance matrix 
     to help the model understand spatial relationships.
@@ -689,6 +847,102 @@ class PositionalEncodingMatrix(torch.nn.Module):
             Positional encoding matrix [seq_len, seq_len, d_model]
         """
         return self.pe[:seq_len, :seq_len, :]
+
+
+class LazyResidueBasedPositionalEncodingMatrix(torch.nn.Module):
+    """
+    Lazy residue-based positional encoding that only computes encoding when needed.
+    More memory efficient for smaller sequences while incorporating amino acid information.
+    """
+    
+    def __init__(self, d_model: int, max_len: int = 500, aa_embedding_dim: int = 64):
+        super().__init__()
+        self.d_model = d_model
+        self.max_len = max_len
+        self.aa_embedding_dim = aa_embedding_dim
+        self._pos_cache = {}
+        
+        # Amino acid type embedding (21 types: 20 standard + 1 unknown)
+        self.aa_embedding = torch.nn.Embedding(21, aa_embedding_dim)
+        
+        # Positional encoding dimension (remaining space after aa embeddings)
+        self.pos_dim = d_model - aa_embedding_dim * 2  # *2 for both residues in pair
+        if self.pos_dim <= 0:
+            raise ValueError(f"d_model ({d_model}) must be larger than 2*aa_embedding_dim ({2*aa_embedding_dim})")
+    
+    def _get_positional_encoding(self, seq_len: int) -> torch.Tensor:
+        """Get cached or compute positional encoding."""
+        if seq_len in self._pos_cache:
+            return self._pos_cache[seq_len]
+        
+        # Create positional encoding matrix for the specific sequence length
+        pe = torch.zeros(seq_len, seq_len, self.pos_dim)
+        
+        # Create position indices
+        positions_i = torch.arange(seq_len, dtype=torch.float).unsqueeze(1).expand(seq_len, seq_len)
+        positions_j = torch.arange(seq_len, dtype=torch.float).unsqueeze(0).expand(seq_len, seq_len)
+        rel_distances = torch.abs(positions_i - positions_j)
+        
+        # Create dimension indices for vectorized computation
+        dim_indices = torch.arange(0, self.pos_dim, 3, dtype=torch.float)
+        
+        # Vectorized sinusoidal encoding for positional information
+        for idx, k in enumerate(dim_indices):
+            k = int(k)
+            if k < self.pos_dim:
+                # Position i encoding
+                div_term_i = 10000 ** (k / self.pos_dim)
+                pe[:, :, k] = torch.sin(positions_i / div_term_i)
+                
+                if k + 1 < self.pos_dim:
+                    # Position j encoding
+                    div_term_j = 10000 ** ((k + 1) / self.pos_dim)
+                    pe[:, :, k + 1] = torch.sin(positions_j / div_term_j)
+                
+                if k + 2 < self.pos_dim:
+                    # Relative distance encoding
+                    div_term_rel = 10000 ** ((k + 2) / self.pos_dim)
+                    pe[:, :, k + 2] = torch.cos(rel_distances / div_term_rel)
+        
+        # Cache the result
+        self._pos_cache[seq_len] = pe
+        return pe
+    
+    def forward(self, seq_len: int, aa_types: torch.Tensor = None) -> torch.Tensor:
+        """
+        Args:
+            seq_len: Sequence length
+            aa_types: [seq_len] tensor of amino acid type indices (0-20)
+            
+        Returns:
+            Positional encoding matrix [seq_len, seq_len, d_model]
+        """
+        device = next(self.parameters()).device
+        
+        # Get positional encoding
+        pos_encoding = self._get_positional_encoding(seq_len)
+        pos_encoding = pos_encoding.to(device)
+        
+        if aa_types is not None:
+            # Ensure aa_types is on the correct device
+            if aa_types.device != device:
+                aa_types = aa_types.to(device)
+                
+            # Get amino acid embeddings
+            aa_embeds = self.aa_embedding(aa_types)  # [seq_len, aa_embedding_dim]
+            
+            # Create pairwise amino acid embeddings
+            aa_i = aa_embeds.unsqueeze(1).expand(seq_len, seq_len, self.aa_embedding_dim)  # [seq_len, seq_len, aa_embedding_dim]
+            aa_j = aa_embeds.unsqueeze(0).expand(seq_len, seq_len, self.aa_embedding_dim)  # [seq_len, seq_len, aa_embedding_dim]
+            
+            # Concatenate positional encoding with amino acid embeddings
+            full_encoding = torch.cat([pos_encoding, aa_i, aa_j], dim=-1)  # [seq_len, seq_len, d_model]
+        else:
+            # If no amino acid types provided, pad with zeros
+            aa_padding = torch.zeros(seq_len, seq_len, self.aa_embedding_dim * 2, device=device)
+            full_encoding = torch.cat([pos_encoding, aa_padding], dim=-1)
+        
+        return full_encoding
 
 
 class LazyPositionalEncodingMatrix(torch.nn.Module):
@@ -847,6 +1101,8 @@ def load_ours(
     input_type: str = "distances",
     coordinate_processing: str = "to_distances",
     lazy_pos_encoding: bool = False,
+    residue_based_encoding: bool = False,
+    aa_embedding_dim: int = 64,
     **kwargs,
 ):
     """
@@ -861,6 +1117,8 @@ def load_ours(
         input_type: Type of input data - "distances" for pairwise distances or "coordinates" for 3D coordinates (only used for transferable=True)
         coordinate_processing: How to process coordinates - "to_distances" or "direct" (only used when transferable=True and input_type="coordinates")
         lazy_pos_encoding: Use lazy positional encoding for faster initialization (only used when transferable=True)
+        residue_based_encoding: Use residue-based positional encoding that incorporates amino acid type information (only used when transferable=True)
+        aa_embedding_dim: Dimension for amino acid type embeddings (only used when transferable=True and residue_based_encoding=True)
         **kwargs: Additional arguments for transferable model
     
     Returns:
@@ -875,6 +1133,8 @@ def load_ours(
             input_type=input_type,
             coordinate_processing=coordinate_processing,
             lazy_pos_encoding=lazy_pos_encoding,
+            residue_based_encoding=residue_based_encoding,
+            aa_embedding_dim=aa_embedding_dim,
             **kwargs
         )
         print(f"Loaded transferable MLCV model with {mlcv_dim}D output")
@@ -917,6 +1177,8 @@ def load_transferable_mlcv(
     input_type: str = "distances",
     coordinate_processing: str = "to_distances",
     lazy_pos_encoding: bool = False,
+    residue_based_encoding: bool = False,
+    aa_embedding_dim: int = 64,
     **kwargs,
 ):
     """
@@ -936,6 +1198,8 @@ def load_transferable_mlcv(
         input_type: Type of input data - "distances" for pairwise distances or "coordinates" for 3D coordinates
         coordinate_processing: How to process coordinates - "to_distances" or "direct" (only used when input_type="coordinates")
         lazy_pos_encoding: Use lazy positional encoding for faster initialization
+        residue_based_encoding: Use residue-based positional encoding that incorporates amino acid type information
+        aa_embedding_dim: Dimension for amino acid type embeddings (only used when residue_based_encoding=True)
         **kwargs: Additional arguments
     
     Returns:
@@ -956,6 +1220,8 @@ def load_transferable_mlcv(
         input_type=input_type,
         coordinate_processing=coordinate_processing,
         lazy_pos_encoding=lazy_pos_encoding,
+        residue_based_encoding=residue_based_encoding,
+        aa_embedding_dim=aa_embedding_dim,
         **kwargs
     )
     mlcv_model.train()
@@ -966,6 +1232,9 @@ def load_transferable_mlcv(
         print(f"Coordinate processing: {coordinate_processing}")
     print(f"Max sequence length: {max_seq_len}")
     print(f"Lazy positional encoding: {lazy_pos_encoding}")
+    print(f"Residue-based encoding: {residue_based_encoding}")
+    if residue_based_encoding:
+        print(f"Amino acid embedding dimension: {aa_embedding_dim}")
     print(mlcv_model)
     
     return mlcv_model

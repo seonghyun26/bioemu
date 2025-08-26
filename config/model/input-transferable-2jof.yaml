@@ -1,0 +1,36 @@
+score_model:
+  last_training: 1
+  mode: eval
+  ckpt_path: /home/shpark/prj-mlcv/lib/bioemu/config/checkpoint.pt
+  cfg_path: /home/shpark/prj-mlcv/lib/bioemu/config/score_config.yaml
+  init: xavier_normal
+training:
+  enable_loss_clipping: False
+  max_loss_value: 10.0
+  min_loss_value: 0.0
+  method: standard
+  seed: 0
+  num_epochs: 500
+  batch_size: 512
+  learning_rate: 1e-8
+  loss: cad_rmsd
+  gradient_clip: True
+  gradient_clip_val: 1.0
+  scheduler:
+    name: CosineAnnealingWarmUpRestarts
+    T_mult: 1
+    eta_max: 1e-4
+    warmup_epochs: 20
+    gamma: 0.5
+rollout:
+  mid_t: 0.786
+  N_rollout: 7
+  n_replications: 2
+  record_grad_steps: [3, 4, 5]
+mlcv_model:
+  name: ours
+  mlcv_dim: 1
+  condition_mode: input
+  dim_normalization: False
+  normalization_factor: 1
+  transferable: True

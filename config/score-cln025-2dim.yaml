@@ -1,0 +1,5 @@
+defaults:
+- data: CLN025-50k-cad-pos
+- log: basic
+- model: input-score-2dim
+- sample: basic
