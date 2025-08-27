@@ -97,9 +97,12 @@ class OPESSimulationRunner:
                 sigma_pattern = r'SIGMA=[\d\.]+' 
                 content = re.sub(sigma_pattern, f'SIGMA={self.cfg.sigma}', content)
                 logger.info(f"Set SIGMA parameter to {self.cfg.sigma}")
-            wandb.config.update({
-                'opes/SIGMA': str(self.cfg.sigma)
-            })
+            wandb.config.update(
+                {
+                    'opes/SIGMA': str(self.cfg.sigma)
+                },
+                allow_val_change=True
+            )
             
             with open(target_plumed, 'w') as f:
                 f.write(content)
