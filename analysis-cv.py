@@ -18,7 +18,7 @@ import torch.nn.functional as F
 from matplotlib.colors import LogNorm
 from tqdm import tqdm
 from itertools import combinations
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr
 from torch.utils.data import DataLoader, TensorDataset
 
 
@@ -58,7 +58,9 @@ blue = (70 / 255, 110 / 255, 250 / 255)
 green = (100 / 255, 170 / 255, 120 / 255)
 CUDA_DEVICE = get_available_cuda_device()
 COLORS = ['blue', 'red', 'green', 'orange', 'purple', 'cyan', 'brown', 'magenta']
-
+SQUARE_FIGSIZE = (4, 4)
+RECTANGLE_FIGSIZE = (6, 4)
+BIG_RECTANGLE_FIGSIZE = (12, 6)
 
 # Load components
 
@@ -116,7 +118,7 @@ def load_model_and_data(
             date = date or "0816_171833"
         
         elif molecule == "2JOF":
-            date = date or "0812_125552"
+            date = date or "0814_073849"
         
         elif molecule == "2F4K":
             date = date or "0819_173704"
@@ -170,7 +172,7 @@ def load_model_and_data(
     )
     
     # Load committor model
-    committor_path = "/home/shpark/prj-mlcv/lib/bioemu/notebook/committor.pt"
+    committor_path = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025/committor.pt"
     committor_model = torch.jit.load(committor_path, map_location=f"cuda:{CUDA_DEVICE}")
     
     return mlcv_model, tica_wrapper, committor_model, pos_torch, cad_torch, cad_switch_torch
@@ -567,7 +569,7 @@ def plot_tica_cv_analysis(
             continue
         print(f"> Plotting TICA-CV analysis for {model_type} {molecule}")
         
-        fig = plt.figure(figsize=(5, 4))
+        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = fig.add_subplot(111)
         hb = ax.hexbin(
             x, y, C=cv[:, cv_dim],
@@ -592,7 +594,7 @@ def plot_tica_cv_analysis(
             continue
             
         z = cv[:, cv_dim]
-        fig = plt.figure(figsize=(6, 4))
+        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = fig.add_subplot(111, projection='3d')
         sc = ax.scatter(x, y, z, c=z, cmap='viridis', s=2, alpha=0.6)  # Smaller dots (s=2) and more transparent
         ax.set_xlabel('TIC 1')
@@ -628,7 +630,7 @@ def plot_cv_tica_analysis(
     if not check_image_exists(img_dir, filename_tica1):
         print(f"> Plotting CV 2D histogram colored by TICA-1 for {model_type} {molecule}")
         
-        fig = plt.figure(figsize=(5, 4))
+        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = fig.add_subplot(111)
         hb = ax.hexbin(
             cv[:, 0], cv[:, 1], C=tica_data[:, 0],
@@ -653,7 +655,7 @@ def plot_cv_tica_analysis(
     if not check_image_exists(img_dir, filename_tica2):
         print(f"> Plotting CV 2D histogram colored by TICA-2 for {model_type} {molecule}")
         
-        fig = plt.figure(figsize=(6, 4))
+        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = fig.add_subplot(111)
         hb = ax.hexbin(
             cv[:, 0], cv[:, 1], C=tica_data[:, 1],
@@ -693,7 +695,7 @@ def plot_cv_histogram(
 
         cv_dim_val = cv[:, cv_dim]
         
-        plt.figure(figsize=(6, 4))
+        plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = plt.subplot(111)
         counts, bins, patches = ax.hist(
             cv_dim_val,
@@ -754,7 +756,7 @@ def plot_bond_analysis(
         dummy_pdb.xyz = pos_torch.cpu().detach().numpy()
         label, bond_num = foldedness_by_hbond(dummy_pdb)
             
-        fig = plt.figure(figsize=(6, 4))
+        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = fig.add_subplot(111)
         x = cv[:, cv_dim]
         y = bond_num
@@ -799,13 +801,14 @@ def plot_committor_analysis(
         committor_value = committor_value.cpu().detach().numpy().flatten()
             
         # Scatter plot
-        fig = plt.figure(figsize=(6, 4))
+        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = fig.add_subplot(111)
         ax.scatter(committor_value, cv[:, cv_dim], color=blue, s=2)
-        correlation, p_value = pearsonr(committor_value, cv[:, cv_dim])
-        correlation_text = f'Pearson r = {correlation:.4f}'
+        correlation_pearson, p_value_pearson = pearsonr(committor_value, cv[:, cv_dim])
+        correlation_spearman, p_value_spearman = spearmanr(committor_value, cv[:, cv_dim])
+        correlation_text = f'Pearson r = {correlation_pearson:.4f}\nSpearman ρ = {correlation_spearman:.4f}'
         ax.text(
-            0.35, 0.05,
+            0.35, 0.1,
             correlation_text,
             transform=ax.transAxes, 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
@@ -840,22 +843,28 @@ def plot_rmsd_analysis(
         print(f"> Plotting RMSD vs CV analysis for {model_type} {molecule}")
         rmsd_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-rmsd.pt"
         rmsd_unfolded_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-rmsd_unfolded.pt"
-        if not os.path.exists(rmsd_path) or not os.path.exists(rmsd_unfolded_path):
+        if not os.path.exists(rmsd_path):
             print(f"RMSD data not found at {rmsd_path}")
+            return
+        if not os.path.exists(rmsd_unfolded_path):
+            print(f"RMSD unfolded data not found at {rmsd_unfolded_path}")
             return
         rmsd = torch.load(rmsd_path).numpy()
         rmsd_unfolded = torch.load(rmsd_unfolded_path).numpy()
         
         # Scatter plot
-        fig = plt.figure(figsize=(6, 4))
+        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = fig.add_subplot(111)
         ax.scatter(rmsd, cv[:, cv_dim], color=blue, s=0.5, alpha=0.4, zorder=1)
         ax.scatter(rmsd_unfolded, cv[:, cv_dim], color=green, s=0.5, alpha=0.4, zorder=1)
         
-        # Calculate Pearson correlation
-        correlation_folded, p_value_folded = pearsonr(rmsd, cv[:, cv_dim])
-        correlation_unfolded, p_value_unfolded = pearsonr(rmsd_unfolded, cv[:, cv_dim])
-        correlation_text = f'Folded: Pearson r = {correlation_folded:.4f}\nUnfolded: Pearson r = {correlation_unfolded:.4f}'
+        # Calculate Pearson and Spearman correlations
+        correlation_folded_p, p_value_folded_p = pearsonr(rmsd, cv[:, cv_dim])
+        correlation_unfolded_p, p_value_unfolded_p = pearsonr(rmsd_unfolded, cv[:, cv_dim])
+        correlation_folded_s, p_value_folded_s = spearmanr(rmsd, cv[:, cv_dim])
+        correlation_unfolded_s, p_value_unfolded_s = spearmanr(rmsd_unfolded, cv[:, cv_dim])
+        correlation_text = (f'Folded: Pearson r = {correlation_folded_p:.4f}, Spearman ρ = {correlation_folded_s:.4f}\n'
+                           f'Unfolded: Pearson r = {correlation_unfolded_p:.4f}, Spearman ρ = {correlation_unfolded_s:.4f}')
         ax.text(
             0.4, 0.85, correlation_text, transform=ax.transAxes, 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
@@ -926,7 +935,7 @@ def plot_dssp_full_violin_analysis(
                     ordered_ss_types.append(ss_type)
         
         # Create violin plot
-        fig, ax = plt.subplots(figsize=(6, 4))
+        fig, ax = plt.subplots(figsize=RECTANGLE_FIGSIZE)
         
         # Prepare data for violin plot in the new order
         violin_data = []
@@ -1011,7 +1020,7 @@ def plot_dssp_simplified_violin_analysis(
             continue
         
         # Create violin plot
-        fig, ax = plt.subplots(figsize=(6, 4))
+        fig, ax = plt.subplots(figsize=RECTANGLE_FIGSIZE)
         
         # Prepare data for violin plot
         violin_data = []
@@ -1120,7 +1129,7 @@ def plot_dssp_cv_heatmap(
                         heatmap_data[ss_idx, res_idx] = np.mean(cv_values_for_residue)
             
             # Create the heatmap with reduced spacing
-            fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+            fig, ax = plt.subplots(1, 1, figsize=RECTANGLE_FIGSIZE)
             
             # Plot mean CV values heatmap
             im = ax.imshow(heatmap_data, aspect='auto', cmap='RdBu_r', interpolation='nearest')
@@ -1298,10 +1307,7 @@ def plot_dssp_composition_heatmap(
         if dssp_array is None:
             continue
             
-        # Composition heatmap doesn't depend on the CV method, so exclude model_type from filename
         filename = f"dssp-{dssp_type}-composition-heatmap"
-            
-        # Check for both PNG and PDF extensions
         if check_image_exists(img_dir, filename) or os.path.exists(os.path.join(img_dir, f"{filename}.pdf")):
             print(f"> Skipping {filename} - already exists (composition is method-independent)")
             continue
@@ -1341,7 +1347,7 @@ def plot_dssp_composition_heatmap(
         ss_composition = ss_composition / len(dssp_array)
         
         # Create the heatmap with reduced spacing
-        fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+        fig, ax = plt.subplots(1, 1, figsize=BIG_RECTANGLE_FIGSIZE)
         
         # Plot composition
         im = ax.imshow(ss_composition, aspect='auto', cmap='viridis', interpolation='nearest')
@@ -1351,9 +1357,11 @@ def plot_dssp_composition_heatmap(
             for res_idx in range(ss_composition.shape[1]):
                 value = ss_composition[ss_idx, res_idx]
                 # Choose text color based on background color intensity
-                text_color = 'white' if value > np.nanmax(ss_composition) * 0.5 else 'black'
-                ax.text(res_idx, ss_idx, f'{value:.2f}', 
-                       ha='center', va='center', color=text_color, fontsize=8, weight='bold')
+                text_color = 'white'
+                ax.text(
+                    res_idx, ss_idx, f'{value:.2f}', 
+                    ha='center', va='center', color=text_color, fontsize=8, weight='bold'
+                )
         
         ax.set_xlabel('Residue Index', fontsize=12)
         ax.set_ylabel('Secondary Structure', fontsize=12)
@@ -1395,33 +1403,45 @@ def analyze_correlations(
     correlation_results = []
     for cv_dim in range(MLCV_DIM):
         cv_values = cv[:, cv_dim]
-        correlation, p_value = pearsonr(committor_value, cv_values)
+        correlation_p, p_value_p = pearsonr(committor_value, cv_values)
+        correlation_s, p_value_s = spearmanr(committor_value, cv_values)
         
         correlation_results.append({
             'CV_Dimension': cv_dim,
-            'Correlation': correlation,
-            'P_Value': p_value,
-            'Correlation_Strength': 'Strong' if abs(correlation) > 0.7 else 'Moderate' if abs(correlation) > 0.3 else 'Weak'
+            'Pearson_Correlation': correlation_p,
+            'Pearson_P_Value': p_value_p,
+            'Spearman_Correlation': correlation_s,
+            'Spearman_P_Value': p_value_s,
+            'Pearson_Strength': 'Strong' if abs(correlation_p) > 0.7 else 'Moderate' if abs(correlation_p) > 0.3 else 'Weak',
+            'Spearman_Strength': 'Strong' if abs(correlation_s) > 0.7 else 'Moderate' if abs(correlation_s) > 0.3 else 'Weak'
         })
         
         print(f"CV {cv_dim} vs Committor:")
-        print(f"  Pearson correlation: {correlation:.6f}")
-        print(f"  P-value: {p_value:.2e}")
-        print(f"  Correlation strength: {correlation_results[-1]['Correlation_Strength']}")
+        print(f"  Pearson correlation: {correlation_p:.6f} (p = {p_value_p:.2e}) - {correlation_results[-1]['Pearson_Strength']}")
+        print(f"  Spearman correlation: {correlation_s:.6f} (p = {p_value_s:.2e}) - {correlation_results[-1]['Spearman_Strength']}")
 
     # Additional correlations
     tica_x = tica_data[:, 0]
     tica_y = tica_data[:, 1]
     
-    corr_tica_x, p_tica_x = pearsonr(committor_value, tica_x)
-    corr_tica_y, p_tica_y = pearsonr(committor_value, tica_y)
+    corr_tica_x_p, p_tica_x_p = pearsonr(committor_value, tica_x)
+    corr_tica_y_p, p_tica_y_p = pearsonr(committor_value, tica_y)
+    corr_tica_x_s, p_tica_x_s = spearmanr(committor_value, tica_x)
+    corr_tica_y_s, p_tica_y_s = spearmanr(committor_value, tica_y)
     
-    print(f"\nCommittor vs TICA-1: r = {corr_tica_x:.6f}, p = {p_tica_x:.2e}")
-    print(f"Committor vs TICA-2: r = {corr_tica_y:.6f}, p = {p_tica_y:.2e}")
+    print(f"\nCommittor vs TICA-1:")
+    print(f"  Pearson: r = {corr_tica_x_p:.6f}, p = {p_tica_x_p:.2e}")
+    print(f"  Spearman: ρ = {corr_tica_x_s:.6f}, p = {p_tica_x_s:.2e}")
+    print(f"Committor vs TICA-2:")
+    print(f"  Pearson: r = {corr_tica_y_p:.6f}, p = {p_tica_y_p:.2e}")
+    print(f"  Spearman: ρ = {corr_tica_y_s:.6f}, p = {p_tica_y_s:.2e}")
     
     if bond_num is not None:
-        corr_bond, p_bond = pearsonr(committor_value, bond_num)
-        print(f"Committor vs Bond Number: r = {corr_bond:.6f}, p = {p_bond:.2e}")
+        corr_bond_p, p_bond_p = pearsonr(committor_value, bond_num)
+        corr_bond_s, p_bond_s = spearmanr(committor_value, bond_num)
+        print(f"Committor vs Bond Number:")
+        print(f"  Pearson: r = {corr_bond_p:.6f}, p = {p_bond_p:.2e}")
+        print(f"  Spearman: ρ = {corr_bond_s:.6f}, p = {p_bond_s:.2e}")
 
 
 # MAIN

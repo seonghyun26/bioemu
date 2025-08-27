@@ -2,7 +2,17 @@ cd ../
 
 GPU=${1:-4}
 
-python main.py \
+date=$(date +%m%d_%H%M%S)
+date="0822_152426"
+echo $date
+
+# python main.py \
+#     --config-name tda \
+#     step=600_000_000 \
+#     date=$date \
+#     sigma=$sigma \
+#     gpu=$GPU &
+
+python analysis_opes.py \
     --config-name tda \
-    step=600_000_000 \
-    gpu=$GPU &
+    date=$date

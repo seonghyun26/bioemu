@@ -15,7 +15,6 @@ from pytorch_lightning import Trainer
 
 from mlcolvar.core.transform import Statistics, Transform
 from mlcolvar.cvs import BaseCV
-from mlcolvar.core import FeedForward, Normalization
 
 
 
@@ -251,6 +250,7 @@ class MLCV(BaseCV, lightning.LightningModule):
         
         # ======= BLOCKS =======
         # initialize norm_in
+        from mlcolvar.core import FeedForward, Normalization
         o = "norm_in"
         if (options[o] is not False) and (options[o] is not None):
             self.norm_in = Normalization(self.in_features, **options[o])
@@ -628,8 +628,8 @@ class PostProcess(Transform):
         feature_dim=1,
     ):
         super().__init__(in_features=feature_dim, out_features=feature_dim)
-        self.register_buffer("mean", torch.zeros(feature_dim))
-        self.register_buffer("range", torch.ones(feature_dim))
+        self.register_buffer("mean", torch.zeros(feature_dim, dtype=torch.float32))
+        self.register_buffer("range", torch.ones(feature_dim, dtype=torch.float32))
         
         if stats is not None:
             min_val = stats["min"]

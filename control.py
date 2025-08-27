@@ -50,8 +50,8 @@ class PostProcess(Transform):
         feature_dim=1,
     ):
         super().__init__(in_features=feature_dim, out_features=feature_dim)
-        self.register_buffer("mean", torch.zeros(feature_dim))
-        self.register_buffer("range", torch.ones(feature_dim))
+        self.register_buffer("mean", torch.zeros(feature_dim), dtype=torch.float32)
+        self.register_buffer("range", torch.ones(feature_dim), dtype=torch.float32)
         
         if stats is not None:
             min_val = stats["min"]
