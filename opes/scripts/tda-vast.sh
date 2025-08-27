@@ -10,8 +10,9 @@ python main.py \
     step=600_000_000 \
     date=$date \
     sigma=$sigma \
-    gpu=$GPU &
+    gpu=$GPU 
 
 python analysis_opes.py \
         --config-name tda \
         date=$date
+
