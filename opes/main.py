@@ -294,7 +294,7 @@ class OPESSimulationRunner:
         except FileNotFoundError:
             logger.warning(f"PLUMED file not found: {plumed_file}")
         
-        wandb.config.update(params)
+        wandb.config.update(params, allow_val_change=True)
         logger.info("Wandb initialized and PLUMED parameters logged")
     
     def run(
