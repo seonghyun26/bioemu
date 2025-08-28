@@ -3,12 +3,15 @@ import sys
 import torch
 import hydra
 import argparse
-import numpy as np
-import matplotlib.pyplot as plt
-import mdtraj as md
+import subprocess
 import pickle
 import wandb
 import logging
+
+import numpy as np
+import matplotlib.pyplot as plt
+import mdtraj as md
+
 from matplotlib.colors import LogNorm
 from itertools import combinations
 from pathlib import Path
@@ -238,10 +241,91 @@ def label_by_hbond(
     return labels, bond_sum, distances
 
 
-def plot_free_energy_curve(cfg, log_dir: Path, max_seed: int, analysis_dir: Path):
+def post_process_trajectory(
+    log_dir: Path,
+    analysis_dir: Path,
+    seed: int
+):
+    """Post process trajectory."""
+    
+    # GROMACS command for post procesing trajectory with trjconv
+    cmd = [
+        "gmx", "trjconv",
+        "-f", f"{log_dir}/{seed}.xtc",
+        "-pbc", "nojump",
+        "-o", f"{analysis_dir}/{seed}_tc.xtc",
+    ]
+    
+    # Run and wait for completion
+    print(f"Running command: {' '.join(cmd)}")
+    try:
+        process = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True
+        )
+        if process.returncode == 0:
+            print("✓ gmx trjconv completed successfully")
+            print(f"Created trjconv file: {analysis_dir}/{seed}_tc.xtc")
+        else:
+            print(f"✗ gmx trjconv failed with return code {process.returncode}")
+        if process.stdout:
+            print("STDOUT:", process.stdout)
+        if process.stderr:
+            print("GROMACSOUT:", process.stderr)
+            
+    except subprocess.CalledProcessError as e:
+        print(f"gmx trjconv failed: {e}")
+    
+    
+
+def compute_energy(
+    log_dir: Path,
+    analysis_dir: Path,
+    seed: int,
+):
+    """Compute energy from trajectory data."""
+    
+    # GROMACS command for energy calculation
+    cmd = [
+        "gmx", "energy",
+        "-f", f"{log_dir}/{seed}.edr", 
+        "-o", f"{analysis_dir}/{seed}.xvg",
+        '-xvg', 'none'
+    ]
+
+    print(f"Running command: {' '.join(cmd)}")
+    try:
+        process = subprocess.run(
+            cmd,
+            input="16 17 9 0\\n",
+            capture_output=True,
+            text=True
+        )
+        if process.returncode == 0:
+            print("✓ gmx energy completed successfully")
+            print(f"Created energy file: {analysis_dir}/{seed}.xvg")
+        else:
+            print(f"✗ gmx energy failed with return code {process.returncode}")
+        if process.stdout:
+            print("STDOUT:", process.stdout)
+        if process.stderr:
+            print("GROMACSOUT:", process.stderr)
+            
+    except subprocess.CalledProcessError as e:
+        print(f"gmx energy failed: {e}")
+
+
+def plot_free_energy_curve(
+    cfg,
+    log_dir: Path,
+    max_seed: int,
+    analysis_dir: Path
+):
     """Plot free energy curve from OPES simulation data using folded/unfolded state analysis"""
     logger.info("Plotting free energy curve using hydrogen bond-based folded/unfolded states...")
     
+    # NOTE: modify this function
     # try:
     # Collect data from all seeds
     all_delta_fs = []
@@ -404,157 +488,89 @@ def plot_free_energy_curve(cfg, log_dir: Path, max_seed: int, analysis_dir: Path
     #     raise
 
 
-def plot_rmsd_analysis(cfg, log_dir: Path, max_seed: int, analysis_dir: Path):
+def plot_rmsd_analysis(
+    cfg,
+    log_dir: Path,
+    max_seed: int,
+    analysis_dir: Path,
+):
     """Calculate and plot alpha carbon RMSD to reference PDB"""
     logger.info("Calculating alpha carbon RMSD to reference structure...")
     
     try:
-        # Load reference structure
         ref_pdb_path = f"./data/{cfg.molecule.upper()}/folded.pdb"
         ref_traj = md.load_pdb(ref_pdb_path)
         
-        # Collect RMSD data from all seeds
-        all_rmsds = []
-        all_times = []
-        
         for seed in range(max_seed + 1):
-            # Look for trajectory files (common GROMACS output)
-            traj_files = []
-            for ext in ['.xtc', '.trr', '.dcd']:
-                traj_file = log_dir / f"{seed}{ext}"
-                if traj_file.exists():
-                    traj_files.append(traj_file)
-            
-            # Look for coordinate files
-            coord_file = log_dir / f"{seed}.gro"
-            if not coord_file.exists():
-                coord_file = log_dir / f"{seed}.pdb"
-            
-            if not traj_files and not coord_file.exists():
+            traj_file = log_dir / "analysis" / f"{seed}_tc.xtc"
+            gro_file = log_dir / f"{seed}.gro"
+            if not traj_file and not gro_file.exists():
                 logger.warning(f"No trajectory files found for seed {seed}")
                 continue
             
+            # Load trajectory and compute RMSD
             try:
-                # Load trajectory - try different formats
-                traj = None
-                if traj_files:
-                    # Use first available trajectory file
-                    traj_file = traj_files[0]
-                    traj = md.load(str(traj_file), top=str(ref_pdb_path))
-                elif coord_file.exists():
-                    # Single frame from coordinate file
-                    traj = md.load(str(coord_file))
+                gro_protein_idx = md.load(ref_pdb_path).topology.select("protein")
+                traj = md.load_xtc(
+                    traj_file,
+                    top=gro_file,
+                    atom_indices=gro_protein_idx
+                )
+                traj.center_coordinates()
                 
-                if traj is None:
-                    continue
-                
-                # Compute RMSD
                 rmsd_values = md.rmsd(
                     traj,
                     ref_traj,
                     atom_indices = traj.topology.select("name CA")                        
                 )
-                all_rmsds.append(rmsd_values)
-                
-                # Create time array (assuming uniform time steps)
-                # Get time info from COLVAR if available
-                colvar_file = log_dir / "COLVAR"
-                if colvar_file.exists():
-                    try:
-                        colvar_data = np.loadtxt(colvar_file, comments='#')
-                        if len(colvar_data) > 0:
-                            with open(colvar_file, 'r') as f:
-                                header = f.readline().strip()
-                                keys = header.split()[2:]  # Skip '#!' and 'FIELDS'
-                            time_idx = keys.index('time')
-                            times = colvar_data[:, time_idx] / 1000  # Convert ps to ns
-                            # Interpolate to match trajectory length
-                            if len(times) != len(rmsd_values):
-                                times = np.linspace(0, times[-1], len(rmsd_values))
-                            all_times.append(times)
-                        else:
-                            # Fallback: assume 1 ps timestep
-                            times = np.arange(len(rmsd_values)) * 0.001  # 1 ps = 0.001 ns
-                            all_times.append(times)
-                    except:
-                        # Fallback: assume 1 ps timestep
-                        times = np.arange(len(rmsd_values)) * 0.001
-                        all_times.append(times)
-                else:
-                    # Fallback: assume 1 ps timestep
-                    times = np.arange(len(rmsd_values)) * 0.001
-                    all_times.append(times)
                 
             except Exception as e:
                 logger.warning(f"Error processing trajectory for seed {seed}: {e}")
                 continue
         
-        if not all_rmsds:
-            logger.warning("No valid trajectory data found for RMSD analysis")
-            return
-        
-        # Find common time range
-        min_length = min(len(rmsd) for rmsd in all_rmsds)
-        if min_length == 0:
-            logger.warning("All trajectories are empty")
-            return
-        
-        # Truncate all arrays to same length
-        truncated_rmsds = [rmsd[:min_length] for rmsd in all_rmsds]
-        truncated_times = [times[:min_length] for times in all_times]
-        
-        # Convert to arrays and compute statistics
-        rmsd_array = np.array(truncated_rmsds)
-        mean_rmsd = np.mean(rmsd_array, axis=0)
-        std_rmsd = np.std(rmsd_array, axis=0)
-        
-        # Use time from first seed (should be similar for all)
-        time_axis = truncated_times[0] if truncated_times else np.arange(min_length) * 0.001
-        
-        # Plot RMSD
-        plt.figure(figsize=(5, 3))
-        
-        plt.plot(time_axis, mean_rmsd, color=blue, linewidth=2, label='Mean RMSD')
-        plt.fill_between(time_axis, mean_rmsd - std_rmsd, mean_rmsd + std_rmsd,
-                       alpha=0.3, color=COLORS[2])
-        
-        # Plot individual trajectories with transparency
-        for i, rmsd in enumerate(truncated_rmsds):
-            plt.plot(truncated_times[i] if i < len(truncated_times) else time_axis, 
-                    rmsd, alpha=0.3, color='gray', linewidth=2)
-        
-        from matplotlib.ticker import FormatStrFormatter
-        plt.gca().xaxis.set_major_formatter(FormatStrFormatter("%.2f"))
-
-        plt.xlabel('Time (ns)')
-        plt.ylabel('RMSD (nm)')
-        plt.title(f'Alpha Carbon RMSD to Reference - {cfg.method}')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        
-        # Save plot
-        plot_path = analysis_dir / "rmsd_analysis.png"
-        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-        logger.info(f"RMSD analysis saved to {plot_path}")
-        
-        # Log to wandb
-        wandb.log({
-            "rmsd_analysis": wandb.Image(str(plot_path)),
-            "final_rmsd_mean": float(mean_rmsd[-1]),
-            "final_rmsd_std": float(std_rmsd[-1]),
-            "max_rmsd": float(np.max(mean_rmsd)),
-            "min_rmsd": float(np.min(mean_rmsd))
-        })
-        
-        plt.close()
+            # Load COLVAR data
+            colvar_file = log_dir / f"{seed}" / "COLVAR"
+            if not colvar_file.exists():
+                logger.warning(f"COLVAR file not found: {colvar_file}")
+                continue
+            traj_dat = np.genfromtxt(colvar_file, skip_header=1)
+            time = traj_dat[:, 0]
+            final_time = time[-1] / 1000
+            time_grid = np.linspace(0, final_time, num=len(rmsd_values))
+            
+            # Plot RMSD over time
+            fig = plt.figure(figsize=(5, 3))
+            ax = fig.add_subplot(111)
+            plt.plot(time_grid, rmsd_values, color=blue, linewidth=2, label='RMSD')
+            plt.xlabel('Time (ns)')
+            plt.ylabel('RMSD (nm)')
+            ax.set_title(f'Alpha Carbon RMSD to Reference - {cfg.method}')
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            
+            # Save plot
+            plot_path = analysis_dir / f"rmsd_analysis_{seed}.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+            logger.info(f"RMSD analysis saved to {plot_path}")
+            wandb.log({
+                "rmsd_analysis": wandb.Image(str(plot_path)),
+                "max_rmsd": float(np.max(rmsd_values)),
+                "min_rmsd": float(np.min(rmsd_values))
+            })
+            
+            plt.close()
         
     except Exception as e:
         logger.error(f"Error in RMSD analysis: {e}")
         raise
 
 
-def plot_tica_scatter(cfg, log_dir: Path, max_seed: int, analysis_dir: Path):
+def plot_tica_scatter(
+    cfg,
+    log_dir: Path,
+    max_seed: int,
+    analysis_dir: Path,
+):
     """Plot TICA scatter with simulation trajectory overlay"""
     logger.info("Creating TICA scatter plot...")
     
@@ -579,180 +595,100 @@ def plot_tica_scatter(cfg, log_dir: Path, max_seed: int, analysis_dir: Path):
             tica_coord_full = None
         
         # Process simulation trajectory
-        simulation_tica_coords = []
         for seed in range(max_seed + 1):
-            # Look for trajectory files
-            traj_file = None
-            for ext in ['.xtc', '.trr']:
-                potential_file = log_dir / f"{seed}{ext}"
-                if potential_file.exists():
-                    traj_file = potential_file
-                    break
-            
-            if not traj_file:
+            # Load trajectory data
+            traj_file = log_dir / f"{seed}.xtc"
+            if not traj_file.exists()   :
                 logger.warning(f"No trajectory file found for seed {seed}")
                 continue
-            
-            # Load topology
+
             top_file = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_from_mae.pdb"
             if not Path(top_file).exists():
                 logger.warning(f"Topology file not found: {top_file}")
                 continue
-            
             try:
-                # Load trajectory
                 traj = md.load(str(traj_file), top=top_file)
-                
-                # Compute contacts
                 ca_resid_pair = np.array([(a.index, b.index) for a, b in combinations(list(traj.topology.residues), 2)])
                 ca_pair_contacts, _ = md.compute_contacts(traj, scheme="ca", contacts=ca_resid_pair, periodic=False)
-                
-                # Apply switch function
                 ca_pair_contacts_switch = (1 - np.power(ca_pair_contacts / 0.8, 6)) / (1 - np.power(ca_pair_contacts / 0.8, 12))
-                
-                # Transform to TICA coordinates
                 tica_coord = tica_model.transform(ca_pair_contacts_switch)
-                simulation_tica_coords.append(tica_coord)
-                
             except Exception as e:
                 logger.warning(f"Error processing trajectory for seed {seed}: {e}")
                 continue
         
-        if not simulation_tica_coords:
-            logger.warning("No valid simulation trajectories found for TICA analysis")
-            return
-        
-        # Create plot
-        fig, ax = plt.subplots(figsize=(6, 5))
-        
-        # Plot background (full dataset) if available
-        if tica_coord_full is not None:
-            h = ax.hist2d(
-                tica_coord_full[:, 0], tica_coord_full[:, 1], 
-                bins=100, norm=LogNorm(), alpha=0.3
-            )
-            plt.colorbar(h[3], ax=ax, label='Log Density')
-        
-        # Plot simulation trajectories
-        colors = plt.cm.Set1(np.linspace(0, 1, len(simulation_tica_coords)))
-        for i, tica_coord in enumerate(simulation_tica_coords):
+            # Create plot
+            fig = plt.figure(figsize=(6, 5))
+            ax = fig.add_subplot(111)
+            if tica_coord_full is not None:
+                h = ax.hist2d(
+                    tica_coord_full[:, 0], tica_coord_full[:, 1], 
+                    bins=100, norm=LogNorm(), alpha=0.3
+                )
+                plt.colorbar(h[3], ax=ax, label='Log Density')
             ax.scatter(
                 tica_coord[:, 0], tica_coord[:, 1], 
-                c=blue, s=4, alpha=0.5, label=f'Seed {i}',
+                c=blue, s=2, alpha=0.5,
             )
-        
-        ax.set_xlabel("TIC 1")
-        ax.set_ylabel("TIC 2")
-        ax.set_title(f'TICA Scatter Plot - {cfg.method}')
-        if len(simulation_tica_coords) <= 5:  # Only show legend if not too many seeds
-            ax.legend()
-        ax.grid(True, alpha=0.3)
-        
-        # Save plot
-        plot_path = analysis_dir / "tica_scatter.png"
-        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-        logger.info(f"TICA scatter plot saved to {plot_path}")
-        
-        # Log to wandb
-        wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
-        
-        plt.close()
+            ax.set_xlabel("TIC 1")
+            ax.set_ylabel("TIC 2")
+            ax.set_title(f'TICA Scatter Plot - {cfg.method}')
+            ax.grid(True, alpha=0.3)
+            
+            # Save plot
+            plot_path = analysis_dir / f"tica_scatter_{seed}.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+            logger.info(f"TICA scatter plot saved to {plot_path}")
+            wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
+            plt.close()
         
     except Exception as e:
         logger.error(f"Error in TICA scatter analysis: {e}")
         raise
 
 
-def plot_cv_over_time(cfg, log_dir: Path, max_seed: int, analysis_dir: Path, mlcv_path: Path):
+def plot_cv_over_time(
+    cfg,
+    log_dir: Path,
+    max_seed: int,
+    analysis_dir: Path,
+):
     """Plot CV values over time for simulation trajectories"""
     logger.info("Creating CV over time plots...")
     
-    try:
-        # Load TDA model
-        model_path = f"{mlcv_path}/{cfg.ckpt_path}-jit.pt"
-        if not Path(model_path).exists():
-            logger.warning(f"{cfg.method} model not found: {model_path}")
-            return
-        
-        model = torch.jit.load(model_path)
-        model.eval()
-        
-        # Process each seed
-        all_cv_data = []
-        for seed in range(max_seed + 1):
-            # Look for trajectory files
-            traj_file = None
-            for ext in ['.xtc', '.trr']:
-                potential_file = log_dir / f"{seed}{ext}"
-                if potential_file.exists():
-                    traj_file = potential_file
-                    break
-            
-            if not traj_file:
+    
+    for seed in range(max_seed + 1):
+        try:
+            colvar_file = log_dir / f"{seed}" / "COLVAR"
+            if not colvar_file.exists():
+                logger.warning(f"COLVAR file not found: {colvar_file}")
                 continue
+            traj_dat = np.genfromtxt(colvar_file, skip_header=1)
+            time = traj_dat[:, 0] / 1000
+            cv = traj_dat[:, 1]
+            print(cv)
             
-            # Load topology
-            top_file = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_from_mae.pdb"
-            if not Path(top_file).exists():
-                continue
-            
-            try:
-                # Load trajectory
-                traj = md.load(str(traj_file), top=top_file)
-                
-                # Compute contacts
-                ca_resid_pair = np.array([(a.index, b.index) for a, b in combinations(list(traj.topology.residues), 2)])
-                ca_pair_contacts, _ = md.compute_contacts(traj, scheme="ca", contacts=ca_resid_pair, periodic=False)
-                
-                # Compute CV values
-                with torch.no_grad():
-                    cv = model(torch.from_numpy(ca_pair_contacts))
-                    cv_np = cv.detach().numpy()
-                
-                all_cv_data.append((seed, cv_np))
-                
-            except Exception as e:
-                logger.warning(f"Error processing CV for seed {seed}: {e}")
-                continue
-        
-        if not all_cv_data:
-            logger.warning("No valid CV data found")
-            return
-        
-        # Create plots
-        n_seeds = len(all_cv_data)
-        fig, axes = plt.subplots(n_seeds, 1, figsize=(5, 3), squeeze=False)
-        
-        for i, (seed, cv_np) in enumerate(all_cv_data):
-            ax = axes[i, 0]
-            n_frames, n_cvs = cv_np.shape
-            time = np.arange(n_frames)
-            
-            for j in range(n_cvs):
-                ax.plot(time, cv_np[:, j], label=f"CV {j}", alpha=0.8, linewidth=2, c=blue)
-            
-            ax.set_xlabel("Frames")
+            # Create plots
+            fig = plt.figure(figsize=(5, 3))
+            ax = fig.add_subplot(111)
+            ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=2, c=blue)
+            ax.set_xlabel("Time (ns)")
             ax.set_ylabel("CV Values")
             ax.set_title(f"CV Evolution - Seed {seed}")
-            if n_cvs > 1:
-                ax.legend()
             ax.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        
-        # Save plot
-        plot_path = analysis_dir / "cv_over_time.png"
-        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-        logger.info(f"CV over time plot saved to {plot_path}")
-        
-        # Log to wandb
-        wandb.log({"cv_over_time": wandb.Image(str(plot_path))})
-        
-        plt.close()
-        
-    except Exception as e:
-        logger.error(f"Error in CV over time analysis: {e}")
-        raise
+            plt.tight_layout()
+            
+            # Save plot
+            plot_path = analysis_dir / f"cv_over_time_{seed}.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+            logger.info(f"CV over time plot saved to {plot_path}")
+            wandb.log({
+                f"cv_over_time/{seed}": wandb.Image(str(plot_path))
+            })
+            plt.close()
+            
+        except Exception as e:
+            logger.error(f"Error in CV over time analysis: {e}")
+            raise
 
 
 @hydra.main(
@@ -770,7 +706,6 @@ def main(cfg):
     log_dir = base_simulation_dir / cfg.date
     analysis_dir = log_dir / "analysis"
     analysis_dir.mkdir(exist_ok=True)
-    mlcv_dir = Path("./model") / cfg.ckpt_dir
     
     # Initialize wandb
     config = OmegaConf.to_container(cfg)
@@ -782,18 +717,26 @@ def main(cfg):
     )
     
     try:
-        # Run analysis functions
-        logger.info("Running free energy analysis...")
-        plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
         
+        # Post process
+        # logger.info("Post processing trajectory...")
+        # post_process_trajectory(log_dir, analysis_dir, cfg.seed)
+        
+        # logger.info("Creating energy files with GROMACS and PLUMED...")
+        # compute_energy(log_dir, analysis_dir, cfg.seed)
+        
+        # Run analysis functions
         logger.info("Running RMSD analysis...")
         plot_rmsd_analysis(cfg, log_dir, cfg.seed, analysis_dir)
         
-        logger.info("Running TICA scatter analysis...")
-        plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
+        # logger.info("Running TICA scatter analysis...")
+        # plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
         
-        logger.info("Running CV over time analysis...")
-        plot_cv_over_time(cfg, log_dir, cfg.seed, analysis_dir, mlcv_dir)
+        # logger.info("Running CV over time analysis...")
+        # plot_cv_over_time(cfg, log_dir, cfg.seed, analysis_dir)
+        
+        # logger.info("Running free energy analysis...")
+        # plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
         
         logger.info("Analysis completed successfully!")
         

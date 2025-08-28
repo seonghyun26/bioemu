@@ -59,6 +59,7 @@ class OPESSimulationRunner:
         self.mlcv_dir = Path("./model") / self.cfg.ckpt_dir
         self.mlcv_path = self.mlcv_dir / f"{self.cfg.ckpt_path}-jit.pt"
         self.datetime = cfg.date
+        self.background = cfg.get("background", False)
         
         # Logging
         os.environ['TZ'] = 'Asia/Seoul'
@@ -72,17 +73,22 @@ class OPESSimulationRunner:
     ) -> Path:
         seed_dir = self.log_dir / str(seed)
         seed_dir.mkdir(parents=True, exist_ok=True)
-        (seed_dir / "fes").mkdir(exist_ok=True)
         
-        # Copy base plumed configuration
+        # Create symbolic link for base plumed configuration
         source_plumed = Path("./config") / f"{self.cfg.method}.dat"
         target_plumed = seed_dir / "plumed.dat"
-        shutil.copy2(source_plumed, target_plumed)
+        # shutil.copy2(source_plumed, target_plumed)
+        if target_plumed.exists() or target_plumed.is_symlink():
+            target_plumed.unlink()
+        target_plumed.symlink_to(source_plumed.resolve())
         
-        # Copy mlcv models
+        # Create symbolic link for mlcv models
         source_mlcv_model = self.mlcv_path
         target_mlcv_model = seed_dir / f"{self.cfg.ckpt_path}-jit.pt"
-        shutil.copy2(source_mlcv_model, target_mlcv_model)
+        # shutil.copy2(source_mlcv_model, target_mlcv_model)
+        if target_mlcv_model.exists() or target_mlcv_model.is_symlink():
+            target_mlcv_model.unlink()
+        target_mlcv_model.symlink_to(source_mlcv_model.resolve())
         
         try:
             with open(target_plumed, 'r') as f:
@@ -106,7 +112,7 @@ class OPESSimulationRunner:
             
             with open(target_plumed, 'w') as f:
                 f.write(content)
-            logger.info(f"Modified PLUMED configuration: {target_plumed}")
+            logger.info(f"Created symbolic links and modified PLUMED configuration: {target_plumed}")
             
         except Exception as e:
             logger.error(f"Error modifying PLUMED file: {e}")
@@ -133,6 +139,8 @@ class OPESSimulationRunner:
             "-nb", "gpu",
             "-bonded", "gpu",
         ]
+        if self.background:
+            cmd += [ "&" ]
         
         env = os.environ.copy()
         env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
@@ -244,10 +252,6 @@ class OPESSimulationRunner:
             logger.error(f"Error during analysis: {e}")
             raise
     
-
-
-
-    
     def setup_wandb(
         self
     ):
@@ -306,7 +310,7 @@ class OPESSimulationRunner:
         try:
             self.setup_wandb()
             self.run_simulations()
-            self.run_analysis()
+            # self.run_analysis()
             logger.info("OPES simulation and analysis completed!")
             
         except Exception as e:

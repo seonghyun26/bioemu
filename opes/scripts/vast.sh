@@ -1,18 +1,20 @@
 cd ../
 
 GPU=${1:-4}
-sigma=$2
+method=$2
+sigma=$3
 date=$(date +%m%d_%H%M%S)
 echo $date
 
 python main.py \
-    --config-name tda \
+    --config-name $method \
     step=600_000_000 \
     date=$date \
     sigma=$sigma \
-    gpu=$GPU 
+    +gpu=$GPU  \
+    +background=False
 
 python analysis_opes.py \
-        --config-name tda \
-        date=$date
+    --config-name $method \
+    date=$date
 
