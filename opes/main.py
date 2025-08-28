@@ -77,18 +77,18 @@ class OPESSimulationRunner:
         # Create symbolic link for base plumed configuration
         source_plumed = Path("./config") / f"{self.cfg.method}.dat"
         target_plumed = seed_dir / "plumed.dat"
-        # shutil.copy2(source_plumed, target_plumed)
-        if target_plumed.exists() or target_plumed.is_symlink():
-            target_plumed.unlink()
-        target_plumed.symlink_to(source_plumed.resolve())
+        shutil.copy2(source_plumed, target_plumed)
+        # if target_plumed.exists() or target_plumed.is_symlink():
+        #     target_plumed.unlink()
+        # target_plumed.symlink_to(source_plumed.resolve())
         
         # Create symbolic link for mlcv models
         source_mlcv_model = self.mlcv_path
         target_mlcv_model = seed_dir / f"{self.cfg.ckpt_path}-jit.pt"
-        # shutil.copy2(source_mlcv_model, target_mlcv_model)
-        if target_mlcv_model.exists() or target_mlcv_model.is_symlink():
-            target_mlcv_model.unlink()
-        target_mlcv_model.symlink_to(source_mlcv_model.resolve())
+        shutil.copy2(source_mlcv_model, target_mlcv_model)
+        # if target_mlcv_model.exists() or target_mlcv_model.is_symlink():
+        #     target_mlcv_model.unlink()
+        # target_mlcv_model.symlink_to(source_mlcv_model.resolve())
         
         try:
             with open(target_plumed, 'r') as f:
