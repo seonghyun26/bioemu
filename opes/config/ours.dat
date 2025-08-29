@@ -66,5 +66,5 @@ opes: OPES_METAD ...
 ...
 
 # Print
-PRINT STRIDE=1000 ARG=deep.node-0, opes.bias FILE=COLVAR
+PRINT STRIDE=1000 ARG=deep.node-0,opes.bias FILE=COLVAR
 FLUSH STRIDE=10000
