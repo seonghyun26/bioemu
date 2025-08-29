@@ -8,7 +8,7 @@ echo $date
 
 python main.py \
     --config-name $method \
-    step=600_000_000 \
+    step=300_000_000 \
     date=$date \
     sigma=$sigma \
     gpu=$GPU 

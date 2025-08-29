@@ -6,3 +6,5 @@ ckpt_dir: _baseline_
 ckpt_path: vde-CLN025
 tags: ['opes']
 gpu: 7
+sigma: 0.2
+date: debug-vde

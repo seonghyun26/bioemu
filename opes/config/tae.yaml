@@ -7,3 +7,4 @@ ckpt_path: tae-CLN025
 tags: ['opes']
 gpu: 6
 sigma: 0.2
+date: debug-tae
