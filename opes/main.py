@@ -240,7 +240,7 @@ class OPESSimulationRunner:
         
         # Create analysis directory
         analysis_dir = self.log_dir / "analysis"
-        analysis_dir.mkdir(exist_ok=True)
+        analysis_dir.mkdir(parents=True, exist_ok=True)
         
         try:
             # plot_free_energy_curve(self.cfg, self.log_dir, self.max_seed, analysis_dir)

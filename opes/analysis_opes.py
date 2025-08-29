@@ -544,7 +544,9 @@ def plot_rmsd_analysis(
             plt.plot(time_grid, rmsd_values, color=blue, linewidth=2, label='RMSD')
             plt.xlabel('Time (ns)')
             plt.ylabel('RMSD (nm)')
-            ax.set_title(f'Alpha Carbon RMSD to Reference - {cfg.method}')
+            ax.set_title(f'CA RMSD to Reference - {cfg.method}, {seed}')
+            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
+            # ax.set_yticks([-1, -0.5, 0, 0.5, 1])
             ax.grid(True, alpha=0.3)
             plt.tight_layout()
             
@@ -665,15 +667,16 @@ def plot_cv_over_time(
             traj_dat = np.genfromtxt(colvar_file, skip_header=1)
             time = traj_dat[:, 0] / 1000
             cv = traj_dat[:, 1]
-            print(cv)
             
             # Create plots
             fig = plt.figure(figsize=(5, 3))
             ax = fig.add_subplot(111)
             ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=2, c=blue)
+            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
+            ax.set_yticks([-1, -0.5, 0, 0.5, 1])
             ax.set_xlabel("Time (ns)")
             ax.set_ylabel("CV Values")
-            ax.set_title(f"CV Evolution - Seed {seed}")
+            ax.set_title(f"CV Evolution - {cfg.method} {seed}")
             ax.grid(True, alpha=0.3)
             plt.tight_layout()
             
@@ -702,10 +705,10 @@ def main(cfg):
     logger.info(OmegaConf.to_yaml(cfg))
     
     # Setup paths
-    base_simulation_dir = Path("./simulations") / cfg.molecule / cfg.method
+    base_simulation_dir = Path(f"{os.getcwd()}/simulations") / cfg.molecule / cfg.method
     log_dir = base_simulation_dir / cfg.date
     analysis_dir = log_dir / "analysis"
-    analysis_dir.mkdir(exist_ok=True)
+    analysis_dir.mkdir(parents=True, exist_ok=True)
     
     # Initialize wandb
     config = OmegaConf.to_container(cfg)
@@ -719,21 +722,21 @@ def main(cfg):
     try:
         
         # Post process
-        # logger.info("Post processing trajectory...")
-        # post_process_trajectory(log_dir, analysis_dir, cfg.seed)
+        logger.info("Post processing trajectory...")
+        post_process_trajectory(log_dir, analysis_dir, cfg.seed)
         
-        # logger.info("Creating energy files with GROMACS and PLUMED...")
-        # compute_energy(log_dir, analysis_dir, cfg.seed)
+        logger.info("Creating energy files with GROMACS and PLUMED...")
+        compute_energy(log_dir, analysis_dir, cfg.seed)
         
         # Run analysis functions
         logger.info("Running RMSD analysis...")
         plot_rmsd_analysis(cfg, log_dir, cfg.seed, analysis_dir)
         
-        # logger.info("Running TICA scatter analysis...")
-        # plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
+        logger.info("Running TICA scatter analysis...")
+        plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
         
-        # logger.info("Running CV over time analysis...")
-        # plot_cv_over_time(cfg, log_dir, cfg.seed, analysis_dir)
+        logger.info("Running CV over time analysis...")
+        plot_cv_over_time(cfg, log_dir, cfg.seed, analysis_dir)
         
         # logger.info("Running free energy analysis...")
         # plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
