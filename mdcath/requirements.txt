@@ -1,0 +1,12 @@
+# Requirements for MDCath protein data preprocessing
+
+# Core dependencies
+mdtraj>=1.9.0          # Molecular dynamics trajectory analysis
+torch>=1.8.0           # PyTorch for tensor operations
+pyemma>=2.5.0          # TICA analysis and molecular kinetics
+numpy>=1.18.0          # Numerical computing
+tqdm>=4.0.0            # Progress bars
+
+# Optional dependencies for enhanced functionality
+matplotlib>=3.0.0      # Plotting (if visualization is needed)
+scipy>=1.4.0           # Scientific computing (used by pyemma)
