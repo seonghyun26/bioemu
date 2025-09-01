@@ -12,10 +12,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import mdtraj as md
 
+from tqdm import tqdm
 from matplotlib.colors import LogNorm
 from itertools import combinations
 from pathlib import Path
 from omegaconf import OmegaConf
+
+from adaptive_sampling.processing_tools import mbar
+from adaptive_sampling.processing_tools.utils import DeltaF_fromweights
 
 # Add the parent directory to Python path to import analysis functions
 from src import *
@@ -23,9 +27,8 @@ from src.constant import COLORS, FONTSIZE_SMALL
 
 # Set up logging
 logger = logging.getLogger(__name__)
-
 blue = (70 / 255, 110 / 255, 250 / 255)
-
+R = 0.008314462618  # kJ/mol/K
 
 def label_by_hbond(
     traj,
@@ -316,7 +319,7 @@ def compute_energy(
         print(f"gmx energy failed: {e}")
 
 
-def plot_free_energy_curve(
+def plot_free_energy_curve_by_bond(
     cfg,
     log_dir: Path,
     max_seed: int,
@@ -430,7 +433,7 @@ def plot_free_energy_curve(
     time_axis = truncated_times[0] if truncated_times else np.arange(min_length)
     
     # Plot
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(5, 3))
     mask = ~np.isnan(mean_delta_fs)
     if np.any(mask):
         plt.plot(time_axis[mask], mean_delta_fs[mask], 
@@ -471,6 +474,111 @@ def plot_free_energy_curve(
     # except Exception as e:
     #     logger.error(f"Error in free energy analysis: {e}")
     #     raise
+
+
+def plot_free_energy_curve(
+    cfg,
+    log_dir: Path,
+    max_seed: int,
+    analysis_dir: Path
+):
+    skip_steps = 0
+    ns_per_step = 0.004
+    unit_steps = 250
+    equil_temp = 340
+    all_times = []
+    all_cvs = []
+    all_delta_fs = []
+    
+    for seed in range(max_seed + 1):
+        colvar_file = log_dir / f"{seed}" / "COLVAR"
+        if not colvar_file.exists():
+            logger.warning(f"COLVAR file not found: {colvar_file}")
+            continue
+        
+        try:
+            # Load COLVAR data
+            colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+            time = colvar_data[:, 0]
+            cv = colvar_data[:, 1]
+            bias = colvar_data[:, 2]
+            total_steps = len(colvar_data)
+            step_grid = np.arange(
+                skip_steps + unit_steps, total_steps + 1, unit_steps
+            )
+            all_cvs.append(cv)
+            time_axis = step_grid * ns_per_step
+            all_times.append(time_axis)
+            
+            Delta_Fs = []
+            beta = 1.0 / (R * equil_temp)
+            W = np.exp(beta * bias)  
+            cv_grid = np.arange(cv.min(), cv.max() + cfg.sigma / 2, cfg.sigma)
+            for current_step in tqdm(step_grid):
+                cv_t = cv[skip_steps:current_step]
+                W_t  = W[skip_steps:current_step]
+
+                Delta_F = DeltaF_fromweights(
+                    xi_traj=cv_t,
+                    weights=W_t,
+                    cv_thresh=[cv.min(), (cv.min() + cv.max()) / 2, cv.max()],
+                    T=equil_temp,
+                )
+                Delta_Fs.append(Delta_F)
+            all_delta_fs.append(Delta_Fs)
+        
+        except Exception as e:
+            logger.warning(f"Error processing data for seed {seed}: {e}")
+            continue
+    
+    # Compute mean and std of delta F
+    if not all_delta_fs:
+        logger.warning("No valid data found for free energy analysis")
+        return
+    mean_delta_fs = np.mean(all_delta_fs, axis=0)
+    std_delta_fs = np.std(all_delta_fs, axis=0)
+    time_axis = time_axis
+    print(mean_delta_fs)
+    
+    # Plot
+    plt.figure(figsize=(5, 3))
+    mask = ~np.isnan(mean_delta_fs)
+    if np.any(mask):
+        plt.plot(
+            time_axis[mask], mean_delta_fs[mask], 
+            color=blue, linewidth=2
+        )
+        plt.fill_between(
+            time_axis[mask], 
+            mean_delta_fs[mask] - std_delta_fs[mask],
+            mean_delta_fs[mask] + std_delta_fs[mask],
+            alpha=0.3, color=COLORS[0]
+        )
+    ref_delta_f = 10.06  # kJ/mol - known reference for CLN025
+    plt.axhline(
+        y=ref_delta_f, color=COLORS[1], linestyle='--', 
+        label='Reference', linewidth=2
+    )
+    # plt.fill_between(
+    #     time_axis, ref_delta_f - 0.5, ref_delta_f + 0.5,
+    #     color=COLORS[1], alpha=0.2
+    # )
+    plt.xlabel('Time (ns)')
+    plt.ylabel(r'$\Delta F$ (kJ/mol)')
+    plt.title(f'Free Energy Difference (CVs) - {cfg.method}')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    # Logging
+    plot_path = analysis_dir / "free_energy_curve.png"
+    plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+    logger.info(f"Free energy curve saved to {plot_path}")
+    wandb.log({
+        "free_energy_curve": wandb.Image(str(plot_path)),
+        "free_energy_difference": mean_delta_fs[-1]
+    })
+    plt.close()
 
 
 def plot_rmsd_analysis(
@@ -714,7 +822,6 @@ def main(cfg):
         
         logger.info("Running TICA scatter analysis...")
         plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
-        
         
         logger.info("Running free energy analysis...")
         plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
