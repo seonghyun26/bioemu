@@ -499,10 +499,12 @@ def plot_free_energy_curve(
         try:
             # Load COLVAR data
             colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+            # print(colvar_data)
             time = colvar_data[:, 0]
             cv = colvar_data[:, 1]
             bias = colvar_data[:, 2]
             total_steps = len(colvar_data)
+            # print(total_steps)
             step_grid = np.arange(
                 skip_steps + unit_steps, total_steps + 1, unit_steps
             )
@@ -514,9 +516,10 @@ def plot_free_energy_curve(
             beta = 1.0 / (R * equil_temp)
             W = np.exp(beta * bias)  
             cv_grid = np.arange(cv.min(), cv.max() + cfg.sigma / 2, cfg.sigma)
+            print(step_grid)
             for current_step in tqdm(step_grid):
                 cv_t = cv[skip_steps:current_step]
-                W_t  = W[skip_steps:current_step]
+                W_t = W[skip_steps:current_step]
 
                 Delta_F = DeltaF_fromweights(
                     xi_traj=cv_t,
@@ -554,15 +557,15 @@ def plot_free_energy_curve(
             mean_delta_fs[mask] + std_delta_fs[mask],
             alpha=0.3, color=COLORS[0]
         )
-    ref_delta_f = 10.06  # kJ/mol - known reference for CLN025
+    ref_delta_f = -5  # kJ/mol - known reference for CLN025
     plt.axhline(
         y=ref_delta_f, color=COLORS[1], linestyle='--', 
         label='Reference', linewidth=2
     )
-    # plt.fill_between(
-    #     time_axis, ref_delta_f - 0.5, ref_delta_f + 0.5,
-    #     color=COLORS[1], alpha=0.2
-    # )
+    plt.fill_between(
+        time_axis, ref_delta_f - 4, ref_delta_f + 4,
+        color=COLORS[1], alpha=0.2
+    )
     plt.xlabel('Time (ns)')
     plt.ylabel(r'$\Delta F$ (kJ/mol)')
     plt.title(f'Free Energy Difference (CVs) - {cfg.method}')
@@ -810,18 +813,18 @@ def main(cfg):
         logger.info("Post processing trajectory...")
         post_process_trajectory(log_dir, analysis_dir, cfg.seed)
         
-        logger.info("Creating energy files with GROMACS and PLUMED...")
-        compute_energy(log_dir, analysis_dir, cfg.seed)
+        # logger.info("Creating energy files with GROMACS and PLUMED...")
+        # compute_energy(log_dir, analysis_dir, cfg.seed)
         
-        # Run analysis functions
-        logger.info("Running CV over time analysis...")
-        plot_cv_over_time(cfg, log_dir, cfg.seed, analysis_dir)
+        # # Run analysis functions
+        # logger.info("Running CV over time analysis...")
+        # plot_cv_over_time(cfg, log_dir, cfg.seed, analysis_dir)
         
-        logger.info("Running RMSD analysis...")
-        plot_rmsd_analysis(cfg, log_dir, cfg.seed, analysis_dir)
+        # logger.info("Running RMSD analysis...")
+        # plot_rmsd_analysis(cfg, log_dir, cfg.seed, analysis_dir)
         
-        logger.info("Running TICA scatter analysis...")
-        plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
+        # logger.info("Running TICA scatter analysis...")
+        # plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
         
         logger.info("Running free energy analysis...")
         plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
