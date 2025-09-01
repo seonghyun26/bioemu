@@ -6,5 +6,5 @@ ckpt_dir: _baseline_
 ckpt_path: tica-CLN025
 tags: ['opes']
 gpu: 5
-sigma: 0.2
+sigma: 0.05
 date: debug-tica

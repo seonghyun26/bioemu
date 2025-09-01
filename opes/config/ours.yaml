@@ -6,5 +6,5 @@ ckpt_dir: '.'
 ckpt_path: 0816_171833-CLN025-f32
 tags: ['opes']
 gpu: 7
+sigma: 0.05
 date: debug
-sigma: 0.2

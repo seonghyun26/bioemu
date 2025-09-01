@@ -15,5 +15,6 @@ python main.py \
 
 python analysis_opes.py \
     --config-name $method \
-    date=$date
+    date=$date \
+    sigma=$sigma
 

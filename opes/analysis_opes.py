@@ -332,46 +332,31 @@ def plot_free_energy_curve(
     all_times = []
     
     for seed in range(max_seed + 1):
-        # Look for COLVAR file directly in log_dir
         colvar_file = log_dir / f"{seed}" / "COLVAR"
-        
         if not colvar_file.exists():
             logger.warning(f"COLVAR file not found: {colvar_file}")
             continue
         
-        # Load COLVAR data to get time information
         try:
+            # Load COLVAR data
             colvar_data = np.loadtxt(colvar_file, comments='#')
             if len(colvar_data) == 0:
-                continue
-                
+                continue                
             with open(colvar_file, 'r') as f:
                 header = f.readline().strip()
                 keys = header.split()[2:]  # Skip '#!' and 'FIELDS'
-            
-            # Get time data
             time_idx = keys.index('time')
             times = colvar_data[:, time_idx] / 1000  # Convert ps to ns
             
-            # Load trajectory for hydrogen bond analysis
-            traj_file = None
-            for ext in ['.xtc', '.trr', '.dcd']:
-                potential_file = log_dir / f"{seed}{ext}"
-                if potential_file.exists():
-                    traj_file = potential_file
-                    break
-            
+            # Load trajectory data
+            traj_file = log_dir / f"{seed}.xtc"
+            top_file = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_from_mae.pdb"
             if not traj_file:
                 logger.warning(f"No trajectory file found for seed {seed}")
                 continue
-            
-            # Load topology
-            top_file = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_from_mae.pdb"
             if not Path(top_file).exists():
                 logger.warning(f"Topology file not found: {top_file}")
                 continue
-            
-            # Load trajectory
             traj = md.load(str(traj_file), top=top_file)
             
             # Ensure time arrays match
@@ -503,21 +488,14 @@ def plot_rmsd_analysis(
         
         for seed in range(max_seed + 1):
             traj_file = log_dir / "analysis" / f"{seed}_tc.xtc"
-            gro_file = log_dir / f"{seed}.gro"
-            if not traj_file and not gro_file.exists():
-                logger.warning(f"No trajectory files found for seed {seed}")
-                continue
-            
+
             # Load trajectory and compute RMSD
             try:
-                gro_protein_idx = md.load(ref_pdb_path).topology.select("protein")
                 traj = md.load_xtc(
                     traj_file,
-                    top=gro_file,
-                    atom_indices=gro_protein_idx
+                    top=ref_pdb_path,
                 )
                 traj.center_coordinates()
-                
                 rmsd_values = md.rmsd(
                     traj,
                     ref_traj,
@@ -685,7 +663,7 @@ def plot_cv_over_time(
             plt.savefig(plot_path, dpi=300, bbox_inches="tight")
             logger.info(f"CV over time plot saved to {plot_path}")
             wandb.log({
-                f"cv_over_time/{seed}": wandb.Image(str(plot_path))
+                f"cv_over_time_{seed}": wandb.Image(str(plot_path))
             })
             plt.close()
             
@@ -720,7 +698,6 @@ def main(cfg):
     )
     
     try:
-        
         # Post process
         logger.info("Post processing trajectory...")
         post_process_trajectory(log_dir, analysis_dir, cfg.seed)
@@ -729,17 +706,18 @@ def main(cfg):
         compute_energy(log_dir, analysis_dir, cfg.seed)
         
         # Run analysis functions
+        logger.info("Running CV over time analysis...")
+        plot_cv_over_time(cfg, log_dir, cfg.seed, analysis_dir)
+        
         logger.info("Running RMSD analysis...")
         plot_rmsd_analysis(cfg, log_dir, cfg.seed, analysis_dir)
         
         logger.info("Running TICA scatter analysis...")
         plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
         
-        logger.info("Running CV over time analysis...")
-        plot_cv_over_time(cfg, log_dir, cfg.seed, analysis_dir)
         
-        # logger.info("Running free energy analysis...")
-        # plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
+        logger.info("Running free energy analysis...")
+        plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
         
         logger.info("Analysis completed successfully!")
         

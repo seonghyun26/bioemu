@@ -1,10 +1,10 @@
 method: tda
 molecule: cln025
 seed: 0
-step: 1_000_000
+step: 10_000
 ckpt_dir: _baseline_
 ckpt_path: tda-CLN025
-tags: ['opes']
+tags: ['opes','debug']
 gpu: 4
-sigma: 0.05
-date: debug-tda
+sigma: 0.2
+date: debug
