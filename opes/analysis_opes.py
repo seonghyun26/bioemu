@@ -528,6 +528,9 @@ def plot_pmf(
         beta = 1.0 / (R * equil_temp)
         W = np.exp(beta * bias)  
         
+        print(cv_grid)
+        print(cv)
+        print(W)
         pmf, _ = mbar.pmf_from_weights(
             cv_grid,
             cv,
