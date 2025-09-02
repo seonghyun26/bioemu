@@ -532,14 +532,14 @@ def plot_pmf(
         # print(cv_grid)
         # print(cv)
         # print(W)
-        mask1 = ~np.isnan(cv_grid)
-        mask2 = ~np.isnan(cv)
-        mask3 = ~np.isnan(W)
+        # mask1 = ~np.isnan(cv_grid)
+        # mask2 = ~np.isnan(cv)
+        # mask3 = ~np.isnan(W)
         # mask = mask1 & mask2 & mask3
         pmf, _ = mbar.pmf_from_weights(
-            cv_grid[mask1],
-            cv[mask2],
-            W[mask3],
+            cv_grid,
+            cv,
+            W,
             equil_temp=equil_temp
         )
         all_pmfs.append(pmf)
