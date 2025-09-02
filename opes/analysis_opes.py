@@ -517,7 +517,8 @@ def plot_pmf(
     all_times = []
     all_cvs = []
     all_pmfs = []
-        
+    
+    print(f"Plotting PMF for {cfg.method}, sigma={sigma}, seed={max_seed}")
     for seed in range(max_seed + 1):
         colvar_file = log_dir / f"{seed}" / "COLVAR"
         if not colvar_file.exists():
@@ -551,7 +552,8 @@ def plot_pmf(
             logger.warning(f"Error processing data for seed {seed}: {e}")
             continue
 
-    pmf -= pmf.min()
+    all_pmfs = np.array(all_pmfs)
+    all_pmfs -= all_pmfs.min(axis=0)
     fig = plt.figure(figsize=(5, 3.5))
     ax = fig.add_subplot(111)
     for pmf in all_pmfs:
