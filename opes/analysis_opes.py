@@ -553,12 +553,14 @@ def plot_pmf(
             continue
 
     all_pmfs = np.array(all_pmfs)
+    mask = ~np.isnan(all_pmfs)
+    all_pmfs = all_pmfs[mask]
     all_pmfs -= all_pmfs.min(axis=0)
     fig = plt.figure(figsize=(5, 3.5))
     ax = fig.add_subplot(111)
     for pmf in all_pmfs:
         ax.plot(
-            cv_grid, pmf,
+            cv_grid[mask], pmf,
             color=blue, linewidth=2
         )
     ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
