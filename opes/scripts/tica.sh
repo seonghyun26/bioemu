@@ -4,7 +4,7 @@ GPU=${1:-7}
 sigma=${2:-0.1}
 method=tica
 date=$(date +%m%d_%H%M%S)
-date="0829_174843"
+date="0829_083600"
 echo $date
 
 # python main.py \

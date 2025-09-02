@@ -50,8 +50,10 @@ class PostProcess(Transform):
         feature_dim=1,
     ):
         super().__init__(in_features=feature_dim, out_features=feature_dim)
-        self.register_buffer("mean", torch.zeros(feature_dim), dtype=torch.float32)
-        self.register_buffer("range", torch.ones(feature_dim), dtype=torch.float32)
+        self.register_buffer("mean", torch.zeros(feature_dim))
+        self.register_buffer("range", torch.ones(feature_dim))
+        self.mean = self.mean.to(torch.float32)
+        self.range = self.range.to(torch.float32)
         
         if stats is not None:
             min_val = stats["min"]
@@ -231,6 +233,22 @@ def calc_standard_denoising_loss(
                 pos=clean_pos,
                 node_orientations=clean_orientations,
             ))
+    
+    elif cfg.data.representation == "pos":
+        # Target contains all atom positions, we need CA only
+        pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/{cfg.data.system_id}/{cfg.data.system_id}_from_mae.pdb")
+        ca_indices = pdb.topology.select('name CA')
+        
+        for i, template_graph in enumerate(batch):
+            clean_pos = target[i, ca_indices].to(device)            
+            # DEBUGGING: Set orientations to identity matrix to isolate position learning
+            clean_orientations = orientation[i].to(device)
+            # clean_orientations = torch.eye(3, device=device).unsqueeze(0).repeat(clean_pos.shape[0], 1, 1)
+            clean_graphs.append(template_graph.replace(
+                pos=clean_pos,
+                node_orientations=clean_orientations,
+            ))
+        
     else:
         raise ValueError(f"Representation {cfg.data.representation} not supported")
     
@@ -949,6 +967,10 @@ def main(cfg):
     
     # MLCV model
     method = cfg.model.mlcv_model.name
+    
+    # Check if we should load a pre-trained model
+    load_pretrained = getattr(cfg.model.mlcv_model, 'load_pretrained', False)
+    
     if method == "ours":
         mlcv_model = load_ours(
             input_dim=cfg.data.input_dim,
@@ -957,6 +979,57 @@ def main(cfg):
             normalization_factor=cfg.model.mlcv_model.normalization_factor,
             transferable=cfg.model.mlcv_model.transferable,
         ).to(device)
+    elif method == "trans2":
+        if load_pretrained and hasattr(cfg.model.mlcv_model, 'ckpt_path'):
+            print(f"Loading pre-trained MLCV_TRANSFERABLE2 model from {cfg.model.mlcv_model.ckpt_path}")
+            
+            # Load configuration from checkpoint if available
+            if hasattr(cfg.model.mlcv_model, 'cfg_path') and os.path.exists(cfg.model.mlcv_model.cfg_path):
+                with open(cfg.model.mlcv_model.cfg_path) as f:
+                    mlcv_config = yaml.safe_load(f)
+                print(f"Loaded MLCV config from {cfg.model.mlcv_model.cfg_path}")
+                # Use config from checkpoint file, fallback to current config
+                mlcv_params = mlcv_config.get('mlcv_model', {})
+            else:
+                mlcv_params = {}
+            
+            # Create model with parameters from config (or current config as fallback)
+            mlcv_model = load_transferable_mlcv2(
+                mlcv_dim=mlcv_params.get('mlcv_dim', cfg.model.mlcv_model.mlcv_dim),
+                d_model=mlcv_params.get('d_model', cfg.model.mlcv_model.d_model),
+                d_pair=mlcv_params.get('d_pair', cfg.model.mlcv_model.d_pair),
+                n_head=mlcv_params.get('n_head', cfg.model.mlcv_model.n_head),
+                dim_feedforward=mlcv_params.get('dim_feedforward', cfg.model.mlcv_model.dim_feedforward),
+                n_layers=mlcv_params.get('n_layers', cfg.model.mlcv_model.n_layers),
+                dropout=mlcv_params.get('dropout', cfg.model.mlcv_model.dropout),
+                max_seq_len=mlcv_params.get('max_seq_len', cfg.model.mlcv_model.max_seq_len),
+                dim_normalization=mlcv_params.get('dim_normalization', cfg.model.mlcv_model.dim_normalization),
+                normalization_factor=mlcv_params.get('normalization_factor', cfg.model.mlcv_model.normalization_factor),
+                use_pose_estimation=mlcv_params.get('use_pose_estimation', cfg.model.mlcv_model.use_pose_estimation),
+                residue_based_encoding=mlcv_params.get('residue_based_encoding', cfg.model.mlcv_model.residue_based_encoding),
+                aa_embedding_dim=mlcv_params.get('aa_embedding_dim', cfg.model.mlcv_model.aa_embedding_dim),
+            ).to(device)
+            
+            # Load checkpoint
+            checkpoint = torch.load(cfg.model.mlcv_model.ckpt_path, map_location=device)
+            mlcv_model.load_state_dict(checkpoint['mlcv_state_dict'])
+            print(f"Successfully loaded pre-trained MLCV_TRANSFERABLE2 model from epoch {checkpoint.get('epoch', 'unknown')}")
+        else:
+            mlcv_model = load_transferable_mlcv2(
+                mlcv_dim=cfg.model.mlcv_model.mlcv_dim,
+                d_model=cfg.model.mlcv_model.d_model,
+                d_pair=cfg.model.mlcv_model.d_pair,
+                n_head=cfg.model.mlcv_model.n_head,
+                dim_feedforward=cfg.model.mlcv_model.dim_feedforward,
+                n_layers=cfg.model.mlcv_model.n_layers,
+                dropout=cfg.model.mlcv_model.dropout,
+                max_seq_len=cfg.model.mlcv_model.max_seq_len,
+                dim_normalization=cfg.model.mlcv_model.dim_normalization,
+                normalization_factor=cfg.model.mlcv_model.normalization_factor,
+                use_pose_estimation=cfg.model.mlcv_model.use_pose_estimation,
+                residue_based_encoding=cfg.model.mlcv_model.residue_based_encoding,
+                aa_embedding_dim=cfg.model.mlcv_model.aa_embedding_dim,
+            ).to(device)
     elif method in ["tda","tae", "vde"]:
         mlcv_model = load_baseline(
             model_name=method,
@@ -1242,7 +1315,7 @@ def main(cfg):
     print(f"\n=== POST-PROCESSING MODULE ===")
     reference_frame_path = None
     if hasattr(cfg.data, 'system_id') and cfg.data.system_id == "CLN025":
-        reference_frame_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{cfg.data.system_id}/6bond.pdb"
+        reference_frame_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{cfg.data.system_id}/folded.pdb"
         print(f"Using reference frame: {reference_frame_path}")
     
     mlcv_model = add_postprocessing_module(
@@ -1271,7 +1344,11 @@ def main(cfg):
     torch.save({
         'mlcv_state_dict': mlcv_model.state_dict(),
     }, f"model/{cfg.log.date}/mlcv_model.pt")
-    mlcv_model.trainer = Trainer(logger=False, enable_checkpointing=False, enable_model_summary=False)
+    mlcv_model.trainer = Trainer(
+        logger=False,
+        enable_checkpointing=False,
+        enable_model_summary=False
+    )
     dummy_input = torch.randn(1, current_data.shape[1]).to(device)
     traced_model = torch.jit.trace(mlcv_model, dummy_input)
     traced_model.save(f"model/{cfg.log.date}/mlcv_model-jit.pt")

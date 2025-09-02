@@ -1,0 +1,5 @@
+defaults:
+- data: CLN025-pos-pos
+- log: basic
+- model: input-score-coord
+- sample: basic

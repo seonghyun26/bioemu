@@ -1005,6 +1005,111 @@ class LazyPositionalEncodingMatrix(torch.nn.Module):
         return pe
 
 
+class SimpleResiduePositionalEncoding(torch.nn.Module):
+    """
+    Simple residue-based positional encoding for coordinate inputs.
+    
+    This encoding provides sequence position information for each residue
+    in a coordinate-based model, using sinusoidal positional encoding
+    that is commonly used in transformer architectures.
+    """
+    
+    def __init__(self, d_model: int, max_len: int = 500):
+        super().__init__()
+        self.d_model = d_model
+        self.max_len = max_len
+        
+        # Create positional encoding for sequence positions
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        
+        # Create dimension indices for vectorized computation
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        
+        # Apply sinusoidal encoding
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        
+        self.register_buffer('pe', pe)
+    
+    def forward(self, seq_len: int) -> torch.Tensor:
+        """
+        Args:
+            seq_len: Sequence length
+            
+        Returns:
+            Positional encoding [seq_len, d_model]
+        """
+        return self.pe[:seq_len, :]
+
+
+class SimpleResidueBasedPositionalEncoding(torch.nn.Module):
+    """
+    Simple residue-based positional encoding that incorporates amino acid type information.
+    
+    This encoding combines sequence position information with amino acid type
+    embeddings for coordinate-based protein modeling.
+    """
+    
+    def __init__(self, d_model: int, max_len: int = 500, aa_embedding_dim: int = 32):
+        super().__init__()
+        self.d_model = d_model
+        self.max_len = max_len
+        self.aa_embedding_dim = aa_embedding_dim
+        
+        # Amino acid type embedding (21 types: 20 standard + 1 unknown)
+        self.aa_embedding = torch.nn.Embedding(21, aa_embedding_dim)
+        
+        # Positional encoding dimension (remaining space after aa embeddings)
+        self.pos_dim = d_model - aa_embedding_dim
+        if self.pos_dim <= 0:
+            raise ValueError(f"d_model ({d_model}) must be larger than aa_embedding_dim ({aa_embedding_dim})")
+        
+        # Create positional encoding for sequence positions
+        pe = torch.zeros(max_len, self.pos_dim)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        
+        # Create dimension indices for vectorized computation
+        div_term = torch.exp(torch.arange(0, self.pos_dim, 2).float() * (-math.log(10000.0) / self.pos_dim))
+        
+        # Apply sinusoidal encoding
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        
+        self.register_buffer('pe', pe)
+    
+    def forward(self, seq_len: int, aa_types: torch.Tensor = None) -> torch.Tensor:
+        """
+        Args:
+            seq_len: Sequence length
+            aa_types: [seq_len] tensor of amino acid type indices (0-20)
+            
+        Returns:
+            Positional encoding [seq_len, d_model]
+        """
+        device = self.pe.device
+        
+        # Get positional encoding
+        pos_encoding = self.pe[:seq_len, :]  # [seq_len, pos_dim]
+        
+        if aa_types is not None:
+            # Ensure aa_types is on the correct device
+            if aa_types.device != device:
+                aa_types = aa_types.to(device)
+                
+            # Get amino acid embeddings
+            aa_embeds = self.aa_embedding(aa_types)  # [seq_len, aa_embedding_dim]
+            
+            # Concatenate positional encoding with amino acid embeddings
+            full_encoding = torch.cat([pos_encoding, aa_embeds], dim=-1)  # [seq_len, d_model]
+        else:
+            # If no amino acid types provided, pad with zeros
+            aa_padding = torch.zeros(seq_len, self.aa_embedding_dim, device=device)
+            full_encoding = torch.cat([pos_encoding, aa_padding], dim=-1)
+        
+        return full_encoding
+
+
 class VDELoss(torch.nn.Module):
     def forward(
         self,
@@ -1238,6 +1343,334 @@ def load_transferable_mlcv(
     print(mlcv_model)
     
     return mlcv_model
+
+class MLCV_TRANSFERABLE2(BaseCV, lightning.LightningModule):
+    """
+    Next-generation transferable MLCV model that directly processes 3D coordinates.
+    
+    This model follows the bioemu DistributionalGraphormer architecture more closely,
+    working directly with 3D coordinates and pose information (translations + rotations)
+    rather than converting to distance matrices. It uses the proven SAAttention mechanism
+    for structural awareness while maintaining transferability across protein sizes.
+    
+    Key improvements over MLCV_TRANSFERABLE:
+    - Direct coordinate processing (no distance matrix conversion)
+    - Uses pose information (translations + rotations) for proper geometric attention
+    - Follows bioemu's coordinate-centric architecture
+    - Better geometric understanding through point-based attention
+    """
+    BLOCKS = ["norm_in", "encoder"]
+    
+    def __init__(
+        self,
+        mlcv_dim: int = 2,
+        d_model: int = 256,
+        d_pair: int = 128,
+        n_head: int = 8,
+        dim_feedforward: int = 512,
+        n_layers: int = 3,
+        dropout: float = 0.1,
+        max_seq_len: int = 500,
+        dim_normalization: bool = False,
+        normalization_factor: float = 1.0,
+        use_pose_estimation: bool = True,
+        residue_based_encoding: bool = True,
+        aa_embedding_dim: int = 64,
+        **kwargs,
+    ):
+        """
+        Args:
+            input_dim: Always 3 for coordinate input [x, y, z]
+            mlcv_dim: Output dimension of the collective variable
+            d_model: Model dimension for attention layers
+            d_pair: Pair representation dimension
+            n_head: Number of attention heads
+            dim_feedforward: Feedforward network dimension
+            n_layers: Number of SA encoder layers
+            dropout: Dropout probability
+            max_seq_len: Maximum sequence length for position encoding
+            dim_normalization: Whether to apply dimension normalization
+            normalization_factor: Factor for dimension normalization
+            use_pose_estimation: Whether to estimate local coordinate frames (like bioemu)
+            residue_based_encoding: Use residue-based positional encoding
+            aa_embedding_dim: Dimension for amino acid type embeddings
+        """
+        super().__init__(in_features=3, out_features=mlcv_dim)
+        
+        self.input_dim = 3
+        self.mlcv_dim = mlcv_dim
+        self.d_model = d_model
+        self.max_seq_len = max_seq_len
+        self.use_pose_estimation = use_pose_estimation
+        self.residue_based_encoding = residue_based_encoding
+        self.aa_embedding_dim = aa_embedding_dim
+        
+        # Coordinate embedding - directly embed 3D coordinates
+        self.coordinate_embedding = torch.nn.Linear(3, d_model)
+        
+        # Pose estimation network (if enabled) - estimates local coordinate frames
+        if use_pose_estimation:
+            self.pose_estimator = torch.nn.Sequential(
+                torch.nn.Linear(d_model, dim_feedforward),
+                torch.nn.ReLU(),
+                torch.nn.Dropout(dropout),
+                torch.nn.Linear(dim_feedforward, 12)  # 3 for translation + 9 for rotation matrix
+            )
+        
+        # Position encoding - use simple residue-based encoding for coordinates
+        if residue_based_encoding:
+            self.pos_encoding = SimpleResidueBasedPositionalEncoding(d_model, max_seq_len, aa_embedding_dim)
+        else:
+            self.pos_encoding = SimpleResiduePositionalEncoding(d_model, max_seq_len)
+        
+        # Pair representation initialization
+        self.pair_projection = torch.nn.Linear(d_model, d_pair)
+        
+        # Structure-aware encoder layers (using the bioemu-style SAEncoderLayer)
+        self.encoder_layers = torch.nn.ModuleList([
+            SAEncoderLayer(
+                d_model=d_model,
+                d_pair=d_pair,
+                n_head=n_head,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout
+            ) for _ in range(n_layers)
+        ])
+        
+        # Global pooling and output projection
+        self.global_pool = torch.nn.AdaptiveAvgPool1d(1)
+        self.output_projection = torch.nn.Sequential(
+            torch.nn.Linear(d_model, dim_feedforward),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(dropout),
+            torch.nn.Linear(dim_feedforward, mlcv_dim)
+        )
+        
+        # Optional dimension normalization
+        if dim_normalization and mlcv_dim > 1:
+            self.postprocessing = DIM_NORMALIZATION(
+                feature_dim=mlcv_dim,
+                normalization_factor=normalization_factor,
+            )
+    
+    def estimate_local_frames(self, coordinates: torch.Tensor, coord_features: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Estimate local coordinate frames for each residue from coordinates and features.
+        
+        Args:
+            coordinates: [B, L, 3] input coordinates
+            coord_features: [B, L, d_model] embedded coordinate features
+            
+        Returns:
+            translations: [B, L, 3] local frame translations
+            rotations: [B, L, 3, 3] local frame rotation matrices
+        """
+        batch_size, seq_len = coordinates.shape[:2]
+        device = coordinates.device
+        
+        if self.use_pose_estimation:
+            # Estimate poses from embedded features
+            pose_params = self.pose_estimator(coord_features)  # [B, L, 12]
+            
+            # Split into translation and rotation components
+            translations = pose_params[..., :3]  # [B, L, 3]
+            rotation_flat = pose_params[..., 3:]  # [B, L, 9]
+            
+            # Reshape and normalize rotation matrices
+            rotations = rotation_flat.reshape(batch_size, seq_len, 3, 3)  # [B, L, 3, 3]
+            
+            # Apply Gram-Schmidt orthogonalization to ensure valid rotation matrices
+            # Normalize first column
+            r1 = rotations[..., 0]
+            r1 = r1 / (torch.norm(r1, dim=-1, keepdim=True) + 1e-8)
+            
+            # Orthogonalize second column
+            r2 = rotations[..., 1]
+            r2 = r2 - torch.sum(r1 * r2, dim=-1, keepdim=True) * r1
+            r2 = r2 / (torch.norm(r2, dim=-1, keepdim=True) + 1e-8)
+            
+            # Compute third column as cross product
+            r3 = torch.cross(r1, r2, dim=-1)
+            
+            rotations = torch.stack([r1, r2, r3], dim=-1)  # [B, L, 3, 3]
+        else:
+            # Use identity frames centered at coordinates
+            translations = coordinates  # [B, L, 3]
+            rotations = torch.eye(3, device=device).unsqueeze(0).unsqueeze(0).repeat(batch_size, seq_len, 1, 1)
+        
+        return translations, rotations
+    
+    def create_pair_representation(self, coordinates: torch.Tensor, coord_features: torch.Tensor, aa_types: torch.Tensor = None) -> torch.Tensor:
+        """
+        Create pair representation from coordinates and features.
+        
+        Args:
+            coordinates: [B, L, 3] input coordinates
+            coord_features: [B, L, d_model] embedded coordinate features
+            aa_types: [B, L] or [L] amino acid type indices (optional)
+            
+        Returns:
+            x2d: [B, L, L, d_pair] pair representation
+        """
+        batch_size, seq_len = coordinates.shape[:2]
+        
+        # Compute pairwise coordinate differences
+        coord_i = coordinates.unsqueeze(2)  # [B, L, 1, 3]
+        coord_j = coordinates.unsqueeze(1)  # [B, 1, L, 3]
+        coord_diff = coord_i - coord_j  # [B, L, L, 3]
+        
+        # Embed coordinate differences
+        coord_diff_embedded = self.coordinate_embedding(coord_diff)  # [B, L, L, d_model]
+        
+        # Add pairwise feature interactions
+        feat_i = coord_features.unsqueeze(2)  # [B, L, 1, d_model]
+        feat_j = coord_features.unsqueeze(1)  # [B, 1, L, d_model]
+        feat_interaction = feat_i + feat_j  # [B, L, L, d_model]
+        
+        # Combine coordinate and feature information
+        pair_features = coord_diff_embedded + feat_interaction  # [B, L, L, d_model]
+        
+        # Add positional encoding to sequence features (not pair features)
+        # The positional encoding is now applied to the sequence representation (x1d) in the forward pass
+        # Here we just add a small positional bias to pair features for stability
+        pos_bias = torch.zeros(batch_size, seq_len, seq_len, self.d_model, device=coordinates.device)
+        pair_features = pair_features + pos_bias
+        
+        # Project to pair dimension
+        x2d = self.pair_projection(pair_features)  # [B, L, L, d_pair]
+        
+        return x2d
+    
+    def forward(self, coordinates: torch.Tensor, aa_types: torch.Tensor = None) -> torch.Tensor:
+        """
+        Forward pass of MLCV_TRANSFERABLE2.
+        
+        Args:
+            coordinates: [B, L, 3] 3D coordinates
+            aa_types: [B, L] or [L] amino acid type indices (optional but recommended)
+            
+        Returns:
+            cv: [B, mlcv_dim] collective variables
+        """
+        
+        batch_size, seq_len, coord_dim = coordinates.shape
+        device = coordinates.device
+        if len(coordinates.shape) != 3 or coord_dim != 3:
+            raise ValueError(f"Expected coordinates with shape [B, L, 3], got {coordinates.shape}")
+        
+        # Embed coordinates
+        coord_features = self.coordinate_embedding(coordinates)  # [B, L, d_model]
+        
+        # Estimate local coordinate frames
+        translations, rotations = self.estimate_local_frames(coordinates, coord_features)
+        pose = (translations, rotations)
+        
+        # Create sequence representation (x1d) with positional encoding
+        x1d = coord_features  # [B, L, d_model]
+        
+        # Add positional encoding to sequence features
+        if self.residue_based_encoding and aa_types is not None:
+            # Use amino acid information in positional encoding
+            if aa_types.dim() == 2:
+                aa_types_sample = aa_types[0]  # Use first sample (assume batch has same sequence)
+            else:
+                aa_types_sample = aa_types
+            pos_encoded = self.pos_encoding(seq_len, aa_types_sample)  # [seq_len, d_model]
+        else:
+            pos_encoded = self.pos_encoding(seq_len)  # [seq_len, d_model]
+        
+        # Add positional encoding to sequence features
+        x1d = x1d + pos_encoded.unsqueeze(0)  # [B, L, d_model]
+        
+        # Create pair representation (x2d)
+        x2d = self.create_pair_representation(coordinates, coord_features, aa_types)  # [B, L, L, d_pair]
+        
+        # Create attention bias (no masking for complete coordinates)
+        bias = torch.zeros(batch_size, 1, seq_len, seq_len, device=device)
+        
+        # Apply SA encoder layers
+        for layer in self.encoder_layers:
+            x1d = layer(x1d, x2d, pose, bias)
+        
+        # Global pooling over sequence length
+        pooled = self.global_pool(x1d.transpose(1, 2)).squeeze(-1)  # [B, d_model]
+        
+        # Output projection
+        cv = self.output_projection(pooled)  # [B, mlcv_dim]
+        
+        # Apply post-processing if available
+        if hasattr(self, 'postprocessing') and self.postprocessing is not None:
+            cv = self.postprocessing(cv)
+        
+        return cv
+
+
+def load_transferable_mlcv2(
+    mlcv_dim: int = 2,
+    d_model: int = 256,
+    d_pair: int = 128,
+    n_head: int = 8,
+    dim_feedforward: int = 512,
+    n_layers: int = 3,
+    dropout: float = 0.1,
+    max_seq_len: int = 500,
+    dim_normalization: bool = False,
+    normalization_factor: float = 1.0,
+    use_pose_estimation: bool = True,
+    residue_based_encoding: bool = True,
+    aa_embedding_dim: int = 64,
+    **kwargs,
+):
+    """
+    Load the next-generation transferable MLCV model that works directly with 3D coordinates.
+    
+    Args:
+        mlcv_dim: Output dimension of the collective variable
+        d_model: Model dimension for attention layers
+        d_pair: Pair representation dimension
+        n_head: Number of attention heads
+        dim_feedforward: Feedforward network dimension
+        n_layers: Number of SA encoder layers
+        dropout: Dropout probability
+        max_seq_len: Maximum sequence length for position encoding
+        dim_normalization: Whether to apply dimension normalization
+        normalization_factor: Factor for dimension normalization
+        use_pose_estimation: Whether to estimate local coordinate frames
+        residue_based_encoding: Use residue-based positional encoding
+        aa_embedding_dim: Dimension for amino acid type embeddings
+        **kwargs: Additional arguments
+    
+    Returns:
+        MLCV_TRANSFERABLE2 model
+    """
+    mlcv_model = MLCV_TRANSFERABLE2(
+        mlcv_dim=mlcv_dim,
+        d_model=d_model,
+        d_pair=d_pair,
+        n_head=n_head,
+        dim_feedforward=dim_feedforward,
+        n_layers=n_layers,
+        dropout=dropout,
+        max_seq_len=max_seq_len,
+        dim_normalization=dim_normalization,
+        normalization_factor=normalization_factor,
+        use_pose_estimation=use_pose_estimation,
+        residue_based_encoding=residue_based_encoding,
+        aa_embedding_dim=aa_embedding_dim,
+        **kwargs
+    )
+    mlcv_model.train()
+    print(f"Loaded MLCV_TRANSFERABLE2 model with {mlcv_dim}D output")
+    print(f"Model architecture: d_model={d_model}, n_layers={n_layers}, n_heads={n_head}")
+    print(f"Coordinate-based processing with pose estimation: {use_pose_estimation}")
+    print(f"Max sequence length: {max_seq_len}")
+    print(f"Residue-based encoding: {residue_based_encoding}")
+    if residue_based_encoding:
+        print(f"Amino acid embedding dimension: {aa_embedding_dim}")
+    print(mlcv_model)
+    
+    return mlcv_model
+
 
 def load_baseline(
     model_name: str,
