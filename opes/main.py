@@ -75,7 +75,7 @@ class OPESSimulationRunner:
         seed_dir.mkdir(parents=True, exist_ok=True)
         
         # Create symbolic link for base plumed configuration
-        source_plumed = Path("./config") / f"{self.cfg.method}.dat"
+        source_plumed = Path("./config") / f"{self.cfg.method}-{self.molecule}.dat"
         target_plumed = seed_dir / "plumed.dat"
         shutil.copy2(source_plumed, target_plumed)
         # if target_plumed.exists() or target_plumed.is_symlink():

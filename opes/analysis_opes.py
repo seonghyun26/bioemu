@@ -281,6 +281,33 @@ def post_process_trajectory(
         print(f"gmx trjconv failed: {e}")
     
     
+def compute_ref_delta_f(
+    cfg,
+):
+    """Compute reference free energy difference using full trajectories.
+
+    Steps:
+    - Load each seed's trajectory and corresponding COLVAR bias
+    - Label frames as folded/unfolded via hydrogen-bond criteria (for CLN025)
+    - Reweight using exp(beta * bias) and aggregate across seeds
+    -  F = kT * ln(P_folded / P_unfolded)
+    """
+    try:
+        base_simulation_dir = Path(f"{os.getcwd()}/simulations") / cfg.molecule / cfg.method
+        log_dir = base_simulation_dir / cfg.date
+
+        equil_temp = 340  # K (consistent with analysis)
+        kT = R * equil_temp
+        beta = 1.0 / kT
+        total_weight_folded = 0.0
+        total_weight_unfolded = 0.0
+
+
+    except Exception as e:
+        logger.error(f"Failed to compute reference  F: {e}")
+        return float('nan')
+
+
 
 def compute_energy(
     log_dir: Path,
@@ -480,7 +507,8 @@ def plot_free_energy_curve(
     cfg,
     log_dir: Path,
     max_seed: int,
-    analysis_dir: Path
+    analysis_dir: Path,
+    ref_delta_f: float = -3.5,
 ):
     skip_steps = 0
     ns_per_step = 0.004
@@ -557,15 +585,15 @@ def plot_free_energy_curve(
             mean_delta_fs[mask] + std_delta_fs[mask],
             alpha=0.3, color=COLORS[0]
         )
-    ref_delta_f = -5  # kJ/mol - known reference for CLN025
-    plt.axhline(
-        y=ref_delta_f, color=COLORS[1], linestyle='--', 
-        label='Reference', linewidth=2
-    )
-    plt.fill_between(
-        time_axis, ref_delta_f - 4, ref_delta_f + 4,
-        color=COLORS[1], alpha=0.2
-    )
+    if ref_delta_f is not None and not np.isnan(ref_delta_f):
+        plt.axhline(
+            y=ref_delta_f, color=COLORS[1], linestyle='--', 
+            label='Reference', linewidth=2
+        )
+        plt.fill_between(
+            time_axis, ref_delta_f - 4, ref_delta_f + 4,
+            color=COLORS[1], alpha=0.2
+        )
     plt.xlabel('Time (ns)')
     plt.ylabel(r'$\Delta F$ (kJ/mol)')
     plt.title(f'Free Energy Difference (CVs) - {cfg.method}')
@@ -827,7 +855,8 @@ def main(cfg):
         # plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
         
         logger.info("Running free energy analysis...")
-        plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
+        ref_delta_f = compute_ref_delta_f(cfg)
+        plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir, ref_delta_f=ref_delta_f)
         
         logger.info("Analysis completed successfully!")
         

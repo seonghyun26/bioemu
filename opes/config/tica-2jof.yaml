@@ -1,0 +1,10 @@
+method: tica
+molecule: 2jof
+seed: 0
+step: 3_000_000
+ckpt_dir: _baseline_
+ckpt_path: tica-2JOF
+tags: ['opes']
+gpu: 4
+sigma: 0.05
+date: debug-tica

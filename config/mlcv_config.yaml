@@ -1,0 +1,19 @@
+# MLCV_TRANSFERABLE2 configuration for pre-trained model
+mlcv_model:
+  name: trans2
+  mlcv_dim: 1
+  condition_mode: input
+  dim_normalization: False
+  normalization_factor: 1.0
+  transferable: True
+  # MLCV_TRANSFERABLE2 specific parameters
+  d_model: 64
+  d_pair: 32
+  n_head: 4
+  dim_feedforward: 64
+  n_layers: 3
+  dropout: 0.1
+  max_seq_len: 500
+  use_pose_estimation: True
+  residue_based_encoding: True
+  aa_embedding_dim: 16  # Must be smaller than d_model

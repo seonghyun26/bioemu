@@ -11,7 +11,7 @@ training:
   method: standard
   seed: 0
   num_epochs: 400
-  batch_size: 1024
+  batch_size: 256
   learning_rate: 1e-8
   loss: cad_rmsd
   gradient_clip: True
@@ -28,9 +28,24 @@ rollout:
   n_replications: 2
   record_grad_steps: [3, 4, 5]
 mlcv_model:
-  name: ours
+  name: trans2
   mlcv_dim: 1
   condition_mode: input
   dim_normalization: False
-  normalization_factor: 1
-  transferable: False
+  normalization_factor: 1.0
+  transferable: True
+  # Checkpoint loading for pre-trained model
+  ckpt_path: /home/shpark/prj-mlcv/lib/bioemu/config/mlcv_checkpoint.pt
+  cfg_path: /home/shpark/prj-mlcv/lib/bioemu/config/mlcv_config.yaml
+  load_pretrained: False  # Set to False to train from scratch
+  # MLCV_TRANSFERABLE2 specific parameters
+  d_model: 64
+  d_pair: 32
+  n_head: 4
+  dim_feedforward: 64
+  n_layers: 3
+  dropout: 0.1
+  max_seq_len: 500
+  use_pose_estimation: True
+  residue_based_encoding: True
+  aa_embedding_dim: 16  # Must be smaller than d_model (64)

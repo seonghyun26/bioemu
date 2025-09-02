@@ -1,18 +1,17 @@
 cd ../
 
 GPU=${1:-6}
-sigma=${2:-0.05}
+sigma=${2:-0.02}
 method=ours
 date=$(date +%m%d_%H%M%S)
-date="0830_162145"
 echo $date
 
-# python main.py \
-#     --config-name $method \
-#     step=200_000_000 \
-#     date=$date \
-#     sigma=$sigma \
-#     gpu=$GPU &
+python main.py \
+    --config-name $method \
+    step=300_000_000 \
+    date=$date \
+    sigma=$sigma \
+    gpu=$GPU &
 
 wait 
 

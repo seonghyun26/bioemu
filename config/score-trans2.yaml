@@ -1,0 +1,5 @@
+defaults:
+- data: CLN025-50k-pos
+- log: basic
+- model: input-trans2
+- sample: basic
