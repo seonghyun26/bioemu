@@ -547,7 +547,7 @@ def plot_pmf(
     all_pmfs = np.array(all_pmfs)
     print(all_pmfs.shape)
     print(all_pmfs)
-    all_pmfs -= all_pmfs.min(axis=0)
+    all_pmfs[0] -= all_pmfs[0].min()
     fig = plt.figure(figsize=(5, 3.5))
     ax = fig.add_subplot(111)
     for pmf in all_pmfs:
