@@ -547,12 +547,13 @@ def plot_pmf(
     all_pmfs = np.array(all_pmfs)
     print(all_pmfs.shape)
     print(all_pmfs)
-    all_pmfs[0] -= all_pmfs[0].min()
+    mask = ~np.isnan(all_pmfs[0])
+    all_pmfs[0] -= all_pmfs[0][mask].min()
     fig = plt.figure(figsize=(5, 3.5))
     ax = fig.add_subplot(111)
     for pmf in all_pmfs:
         ax.plot(
-            cv_grid, pmf,
+            cv_grid[mask], pmf[mask],
             color=blue, linewidth=2
         )
     ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
@@ -926,7 +927,7 @@ def main(cfg):
         logger.info("Running free energy analysis...")
         # ref_delta_f = compute_ref_delta_f(cfg)
         # plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir, ref_delta_f=ref_delta_f)
-        plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
+        # plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
         plot_pmf(cfg, 0.02, log_dir, cfg.seed, analysis_dir)
         
         logger.info("Analysis completed successfully!")
