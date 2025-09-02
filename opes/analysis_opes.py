@@ -503,6 +503,79 @@ def plot_free_energy_curve_by_bond(
     #     raise
 
 
+def plot_pmf(
+    cfg,
+    sigma: float,
+    log_dir: Path,
+    max_seed: int,
+    analysis_dir: Path,
+):
+    skip_steps = 0
+    ns_per_step = 0.004
+    unit_steps = 250
+    equil_temp = 340
+    all_times = []
+    all_cvs = []
+    all_pmfs = []
+        
+    for seed in range(max_seed + 1):
+        colvar_file = log_dir / f"{seed}" / "COLVAR"
+        if not colvar_file.exists():
+            logger.warning(f"COLVAR file not found: {colvar_file}")
+            continue
+        
+        try:
+            # Load COLVAR data
+            colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+            cv = colvar_data[:, 1]
+            cv_grid = np.arange(cv.min(), cv.max() + sigma / 2, sigma)
+            bias = colvar_data[:, 2]
+            beta = 1.0 / (R * equil_temp)
+            W = np.exp(beta * bias)  
+            total_steps = len(colvar_data)
+            step_grid = np.arange(
+                skip_steps + unit_steps, total_steps + 1, unit_steps
+            )
+            all_cvs.append(cv)
+            all_times.append(step_grid * ns_per_step)
+            
+            pmf, _ = mbar.pmf_from_weights(
+                cv_grid,
+                cv,
+                W,
+                equil_temp=equil_temp
+            )
+            all_pmfs.append(pmf)
+        
+        except Exception as e:
+            logger.warning(f"Error processing data for seed {seed}: {e}")
+            continue
+
+    pmf -= pmf.min()
+    fig = plt.figure(figsize=(5, 3.5))
+    ax = fig.add_subplot(111)
+    for pmf in all_pmfs:
+        ax.plot(
+            cv_grid, pmf,
+            color=blue, linewidth=2
+        )
+    ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
+    plt.xticks(fontsize=10)
+    plt.yticks(fontsize=10)
+    plt.xlabel("CV", fontsize=12)
+    plt.ylabel("PMF", fontsize=12)
+    plt.title(f"PMF - {cfg.method}")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(analysis_dir / "pmf.png", dpi=300, bbox_inches="tight")
+    logger.info(f"PMF plot saved to {analysis_dir}/pmf.png")
+    wandb.log({
+        "pmf": wandb.Image(str(analysis_dir / "pmf.png"))
+    })
+    plt.close()
+    
+    return
+
 def plot_free_energy_curve(
     cfg,
     log_dir: Path,
@@ -838,8 +911,8 @@ def main(cfg):
     
     try:
         # Post process
-        logger.info("Post processing trajectory...")
-        post_process_trajectory(log_dir, analysis_dir, cfg.seed)
+        # logger.info("Post processing trajectory...")
+        # post_process_trajectory(log_dir, analysis_dir, cfg.seed)
         
         # logger.info("Creating energy files with GROMACS and PLUMED...")
         # compute_energy(log_dir, analysis_dir, cfg.seed)
@@ -855,8 +928,9 @@ def main(cfg):
         # plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
         
         logger.info("Running free energy analysis...")
-        ref_delta_f = compute_ref_delta_f(cfg)
-        plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir, ref_delta_f=ref_delta_f)
+        # ref_delta_f = compute_ref_delta_f(cfg)
+        # plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir, ref_delta_f=ref_delta_f)
+        plot_pmf(cfg, 0.02, log_dir, cfg.seed, analysis_dir)
         
         logger.info("Analysis completed successfully!")
         
