@@ -934,6 +934,7 @@ def main(cfg):
         logger.info("Running free energy analysis...")
         # ref_delta_f = compute_ref_delta_f(cfg)
         # plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir, ref_delta_f=ref_delta_f)
+        plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir)
         plot_pmf(cfg, 0.02, log_dir, cfg.seed, analysis_dir)
         
         logger.info("Analysis completed successfully!")
