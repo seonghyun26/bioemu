@@ -24,6 +24,7 @@ from adaptive_sampling.processing_tools.utils import DeltaF_fromweights
 # Add the parent directory to Python path to import analysis functions
 from src import *
 from src.constant import COLORS, FONTSIZE_SMALL
+np.NaN = np.nan
 
 # Set up logging
 logger = logging.getLogger(__name__)
