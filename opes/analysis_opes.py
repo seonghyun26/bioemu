@@ -510,12 +510,7 @@ def plot_pmf(
     max_seed: int,
     analysis_dir: Path,
 ):
-    skip_steps = 0
-    ns_per_step = 0.004
-    unit_steps = 250
     equil_temp = 340
-    all_times = []
-    all_cvs = []
     all_pmfs = []
     
     print(f"Plotting PMF for {cfg.method}, sigma={sigma}, seed={max_seed}")
@@ -525,32 +520,21 @@ def plot_pmf(
             logger.warning(f"COLVAR file not found: {colvar_file}")
             continue
         
-        try:
-            # Load COLVAR data
-            colvar_data = np.genfromtxt(colvar_file, skip_header=1)
-            cv = colvar_data[:, 1]
-            cv_grid = np.arange(cv.min(), cv.max() + sigma / 2, sigma)
-            bias = colvar_data[:, 2]
-            beta = 1.0 / (R * equil_temp)
-            W = np.exp(beta * bias)  
-            total_steps = len(colvar_data)
-            step_grid = np.arange(
-                skip_steps + unit_steps, total_steps + 1, unit_steps
-            )
-            all_cvs.append(cv)
-            all_times.append(step_grid * ns_per_step)
-            
-            pmf, _ = mbar.pmf_from_weights(
-                cv_grid,
-                cv,
-                W,
-                equil_temp=equil_temp
-            )
-            all_pmfs.append(pmf)
+        # Load COLVAR data
+        colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+        cv = colvar_data[:, 1]
+        cv_grid = np.arange(cv.min(), cv.max() + sigma / 2, sigma)
+        bias = colvar_data[:, 2]
+        beta = 1.0 / (R * equil_temp)
+        W = np.exp(beta * bias)  
         
-        except Exception as e:
-            logger.warning(f"Error processing data for seed {seed}: {e}")
-            continue
+        pmf, _ = mbar.pmf_from_weights(
+            cv_grid,
+            cv,
+            W,
+            equil_temp=equil_temp
+        )
+        all_pmfs.append(pmf)
 
     all_pmfs = np.array(all_pmfs)
     print(all_pmfs.shape)
