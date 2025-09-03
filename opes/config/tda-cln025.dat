@@ -53,8 +53,6 @@ deep: PYTORCH_MODEL ...
 
 # Bias
 # HEIGHT=0.965
-# GRID_MIN=-8.5
-# GRID_MAX=8.5
 opes: OPES_METAD ...
     ARG=deep.node-0
     PACE=500

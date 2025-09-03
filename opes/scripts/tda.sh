@@ -1,7 +1,7 @@
 cd ../
 
 GPU=${1:-7}
-sigma=${2:-0.1}
+sigma=${2:-0.05}
 method=tda
 date=$(date +%m%d_%H%M%S)
 date="0830_040314"

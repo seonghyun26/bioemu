@@ -4,7 +4,7 @@ GPU=${1:-6}
 sigma=${2:-0.05}
 method=ours
 date=$(date +%m%d_%H%M%S)
-date="0830_162145"
+date="0830_162102"
 echo $date
 
 # python main.py \
