@@ -4,10 +4,10 @@ method="debug"
 date="debug"
 echo $date
 
-python main.py \
-    --config-name $method \
-    date=$date \
-    +tags=['debug']
+# python main.py \
+#     --config-name $method \
+#     date=$date \
+#     +tags=['debug']
 
 wait 
 

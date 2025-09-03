@@ -135,7 +135,7 @@ def compute_cv_values(
         tuple: cv_values
     """
     # cv_path = f"data/{cfg.molecule.upper()}/{cfg.method}_mlcv.pt"
-    cv_path = f"./data/{cfg.molecule.upper()}/ours_mlcv.npy"
+    cv_path = f"./dataset/{cfg.molecule.upper()}-all/{cfg.method}_mlcv.npy"
     if os.path.exists(cv_path):
         print(f"> Using cached CV values from {cv_path}")
         cv = np.load(cv_path)
