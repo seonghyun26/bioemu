@@ -1,24 +1,18 @@
 cd ../
 
-GPU=${1:-6}
-sigma=${2:-0.05}
 method=ours
+molecule=cln025
 date=$(date +%m%d_%H%M%S)
 date="0830_162102"
 echo $date
 
-# python main.py \
-#     --config-name $method \
-#     step=200_000_000 \
-#     date=$date \
-#     sigma=$sigma \
-#     gpu=$GPU &
-
-wait 
-
-sleep 1
+python main.py \
+    --config-name $method-$molecule \
+    step=400_000_000 \
+    date=$date \
+    +tags=['vast']
 
 python analysis_opes.py \
     --config-name $method \
     date=$date \
-    sigma=$sigma
+    +tags=['vast']

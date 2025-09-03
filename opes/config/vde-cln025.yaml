@@ -1,11 +1,11 @@
-molecule: 2jof
-method: tica
+molecule: cln025
+method: vde
 ckpt_dir: _baseline_
-ckpt_path: tica-CLN025
+ckpt_path: vde-CLN025
 date: debug
 tags: ['opes']
 opes:
-  step: 500_000_000
+  step: 400_000_000
   sigma: 0.05
   max_seed: 3
 analysis:

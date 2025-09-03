@@ -1,10 +1,14 @@
-method: tda
 molecule: 2jof
-seed: 0
-step: 1_000_000
+method: tda
 ckpt_dir: _baseline_
-ckpt_path: tda-2JOF
+ckpt_path: tda-CLN025
+date: debug
 tags: ['opes']
-gpu: 4
-sigma: 0.05
-date: debug-tda
+opes:
+  step: 500_000_000
+  sigma: 0.05
+  max_seed: 3
+analysis:
+  skip_steps: 50000
+  unit_steps: 25000
+  equil_temp: 340

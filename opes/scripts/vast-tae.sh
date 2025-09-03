@@ -1,11 +1,12 @@
 cd ../
 
 method=tae
+molecule=cln025
 date=$(date +%m%d_%H%M%S)
 echo $date
 
 python main.py \
-    --config-name $method \
+    --config-name $method-$molecule \
     step=400_000_000 \
     date=$date \
     +tags=['vast']

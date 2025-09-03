@@ -1,7 +1,7 @@
 molecule: 2jof
-method: tica
+method: tae
 ckpt_dir: _baseline_
-ckpt_path: tica-CLN025
+ckpt_path: tae-CLN025
 date: debug
 tags: ['opes']
 opes:
