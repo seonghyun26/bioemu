@@ -52,11 +52,10 @@ deep: PYTORCH_MODEL ...
 ...
 
 # Bias
-# HEIGHT=0.965
 opes: OPES_METAD ...
     ARG=deep.node-0
     PACE=500
-    SIGMA=0.2
+    SIGMA=0.05
     BARRIER=30
     TEMP=340
     FILE=KERNELS

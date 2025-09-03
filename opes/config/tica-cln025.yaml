@@ -1,7 +1,7 @@
 molecule: cln025
-method: tda
+method: tica
 ckpt_dir: _baseline_
-ckpt_path: tda-CLN025
+ckpt_path: tica-CLN025
 date: debug
 tags: ['opes']
 opes:
