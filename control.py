@@ -1353,6 +1353,38 @@ def main(cfg):
     traced_model = torch.jit.trace(mlcv_model, dummy_input)
     traced_model.save(f"model/{cfg.log.date}/mlcv_model-jit.pt")
     
+    # Use the traced model to compute and save CV values for the entire dataset
+    try:
+        traced_model.eval()
+        batch_size_eval = 10000
+        projection_data_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{cfg.data.molecule}-0-protein/{cfg.data.molecule}-0-cad.pt"
+        projection_data = torch.load(projection_data_path).to(device)
+        eval_loader = DataLoader(
+            TensorDataset(projection_data),
+            batch_size=batch_size_eval,
+            shuffle=False
+        )
+        all_cv_batches = []
+        with torch.no_grad():
+            for (batch_idx, batch_eval) in enumerate(tqdm(
+                eval_loader,
+                desc="Computing CV values with traced model",
+                total=len(eval_loader),
+                leave=False,
+            )):
+                batch_input = batch_eval["current_data"].to(device)
+                batch_cv = traced_model(batch_input)
+                all_cv_batches.append(batch_cv.detach().cpu())
+        if len(all_cv_batches) > 0:
+            all_cv = torch.cat(all_cv_batches, dim=0)
+            torch.save(all_cv, f"model/{cfg.log.date}/mlcv_values.pt")
+            print(f"Saved CV values computed with traced model to model/{cfg.log.date}/mlcv_values.pt")
+            print(f"CV shape: {all_cv.shape}, range: [{all_cv.min().item():.6f}, {all_cv.max().item():.6f}]")
+        else:
+            print("Warning: No CV values were computed (empty dataset or loader)")
+    except Exception as e:
+        print(f"Warning: Failed to compute/save CV values with traced model: {e}")
+    
     run.finish()
     
             

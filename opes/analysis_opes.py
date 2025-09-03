@@ -134,55 +134,62 @@ def compute_cv_values(
     Returns:
         tuple: cv_values
     """
-    print(f"> Computing CV values")
-    try:
-        base_simulation_dir = Path(f"{os.getcwd()}/simulations") / cfg.molecule / cfg.method
-        seed_dir = base_simulation_dir / f"{cfg.date}/{max_seed}"
-        jit_files = list(seed_dir.glob("*-jit.pt"))
-        if not jit_files:
-            raise FileNotFoundError(f"No -jit.pt files found in {seed_dir}")
-        mlcv_model_path = jit_files[0]
-        mlcv_model = torch.jit.load(mlcv_model_path)
-        mlcv_model.eval()
-        mlcv_model.to("cuda:0")
-        cad_full_path = f"./dataset/{cfg.molecule.upper()}-all/cad.pt"
-        cad_full = torch.load(cad_full_path)
-        cad_full = cad_full.to("cuda:0")
-        print(f"> Using model file: {mlcv_model_path}")
-    except Exception as e:
-        logger.warning(f"Error loading model: {e}")
-        return None
+    # cv_path = f"data/{cfg.molecule.upper()}/{cfg.method}_mlcv.pt"
+    cv_path = f"./data/{cfg.molecule.upper()}/ours_mlcv.npy"
+    if os.path.exists(cv_path):
+        print(f"> Using cached CV values from {cv_path}")
+        cv = np.load(cv_path)
+        return cv
     
-    # Compute CVs in batches to prevent GPU memory issues
-    try :
-        dataset = TensorDataset(cad_full)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-        with torch.no_grad():
-            sample_batch = next(iter(dataloader))[0]
-            sample_output = mlcv_model(sample_batch)
-            output_dim = sample_output.shape[1]
+    else:
+        print(f"> Computing CV values")
+        try:
+            base_simulation_dir = Path(f"{os.getcwd()}/simulations") / cfg.molecule / cfg.method
+            seed_dir = base_simulation_dir / f"{cfg.date}/{max_seed}"
+            jit_files = list(seed_dir.glob("*-jit.pt"))
+            if not jit_files:
+                raise FileNotFoundError(f"No -jit.pt files found in {seed_dir}")
+            mlcv_model_path = jit_files[0]
+            mlcv_model = torch.jit.load(mlcv_model_path)
+            mlcv_model.eval()
+            mlcv_model.to("cuda:0")
+            cad_full_path = f"./dataset/{cfg.molecule.upper()}-all/cad.pt"
+            cad_full = torch.load(cad_full_path)
+            cad_full = cad_full.to("cuda:0")
+            print(f"> Using model file: {mlcv_model_path}")
+        except Exception as e:
+            logger.warning(f"Error loading model: {e}")
+            return None
         
-        # Process in batches
-        cv_batches = torch.zeros((len(cad_full), output_dim)).to("cuda:0")
-        with torch.no_grad():
-            for batch_idx, (batch_data,) in enumerate(tqdm(
-                dataloader,
-                desc="Computing CV values",
-                total=len(dataloader),
-                leave=False,
-            )):
-                batch_cv = mlcv_model(batch_data)
-                start_idx = batch_idx * batch_size
-                end_idx = start_idx + batch_cv.shape[0]
-                cv_batches[start_idx:end_idx] = batch_cv
+        # Compute CVs in batches to prevent GPU memory issues
+        try :
+            dataset = TensorDataset(cad_full)
+            dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+            with torch.no_grad():
+                sample_batch = next(iter(dataloader))[0]
+                sample_output = mlcv_model(sample_batch)
+                output_dim = sample_output.shape[1]
+            
+            cv_batches = torch.zeros((len(cad_full), output_dim)).to("cuda:0")
+            with torch.no_grad():
+                for batch_idx, (batch_data,) in enumerate(tqdm(
+                    dataloader,
+                    desc="Computing CV values",
+                    total=len(dataloader),
+                    leave=False,
+                )):
+                    batch_cv = mlcv_model(batch_data)
+                    start_idx = batch_idx * batch_size
+                    end_idx = start_idx + batch_cv.shape[0]
+                    cv_batches[start_idx:end_idx] = batch_cv
+            
+            cv = cv_batches.detach().cpu().numpy()
+            print(f"> CV computation complete. Shape: {cv.shape}")
+        except Exception as e:
+            logger.warning(f"Error computing CV values: {e}")
+            return None
         
-        cv = cv_batches.detach().cpu().numpy()
-        print(f"> CV computation complete. Shape: {cv.shape}")
-    except Exception as e:
-        logger.warning(f"Error computing CV values: {e}")
-        return None
-    
-    return cv
+        return cv
 
 
 def plot_pmf(
@@ -677,14 +684,14 @@ def main(cfg):
         # gmx_process_energy(log_dir, analysis_dir, max_seed)
         
         # Run analysis functions
-        # logger.info("Running CV over time analysis...")
-        # plot_cv_over_time(cfg, log_dir, max_seed, analysis_dir)
+        logger.info("Running CV over time analysis...")
+        plot_cv_over_time(cfg, log_dir, max_seed, analysis_dir)
         
-        # logger.info("Running RMSD analysis...")
-        # plot_rmsd_analysis(cfg, log_dir, max_seed, analysis_dir)
+        logger.info("Running RMSD analysis...")
+        plot_rmsd_analysis(cfg, log_dir, max_seed, analysis_dir)
         
-        # logger.info("Running TICA scatter analysis...")
-        # plot_tica_scatter(cfg, log_dir, max_seed, analysis_dir)
+        logger.info("Running TICA scatter analysis...")
+        plot_tica_scatter(cfg, log_dir, max_seed, analysis_dir)
         
         logger.info("Running free energy analysis...")
         reference_cvs = compute_cv_values(cfg, max_seed, batch_size=10000)
