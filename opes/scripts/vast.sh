@@ -7,7 +7,7 @@ echo $date
 
 python main.py \
     --config-name $method-$molecule \
-    step=400_000_000 \
+    opes.step=400_000_000 \
     date=$date \
     +tags=['vast']
 
