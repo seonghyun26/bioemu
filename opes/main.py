@@ -3,6 +3,13 @@ OPES Simulation Runner and Analysis Tool
 
 This script runs OPES (On-the-fly Probability Enhanced Sampling) simulations
 using GROMACS and PLUMED, then analyzes and logs the results to wandb.
+
+PARALLEL EXECUTION APPROACH:
+- The script starts multiple GROMACS simulations in parallel (one for each seed)
+- Each simulation runs independently using subprocess.Popen (non-blocking)
+- After starting all simulations, the script waits for each one to complete
+- This approach allows true parallel execution while maintaining control and monitoring
+- All simulations share the same GPU (GROMACS handles GPU sharing internally)
 """
 
 import os
@@ -27,16 +34,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import time
 
-# Add the parent directory to Python path to import analysis functions
-# sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'enhance'))
 from src import *
-from src.constant import COLORS, FONTSIZE_SMALL
-from analysis_opes import (
-    plot_free_energy_curve,
-    plot_rmsd_analysis,
-    plot_tica_scatter,
-    plot_cv_over_time
-)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -54,12 +52,12 @@ class OPESSimulationRunner:
         self.cfg = cfg
         self.molecule = cfg.molecule
         self.base_simulation_dir = Path("./simulations") / self.molecule / self.cfg.method
-        self.step = cfg.step
-        self.max_seed = cfg.seed
+        self.step = cfg.opes.step
+        self.max_seed = cfg.opes.max_seed
+        self.sigma = cfg.opes.sigma
         self.mlcv_dir = Path("./model") / self.cfg.ckpt_dir
         self.mlcv_path = self.mlcv_dir / f"{self.cfg.ckpt_path}-jit.pt"
         self.datetime = cfg.date
-        self.background = cfg.get("background", False)
         
         # Logging
         os.environ['TZ'] = 'Asia/Seoul'
@@ -101,18 +99,18 @@ class OPESSimulationRunner:
             if hasattr(self.cfg, 'sigma'):
                 # Use regex to find and replace SIGMA parameter more robustly
                 sigma_pattern = r'SIGMA=[\d\.]+' 
-                content = re.sub(sigma_pattern, f'SIGMA={self.cfg.sigma}', content)
-                logger.info(f"Set SIGMA parameter to {self.cfg.sigma}")
+                content = re.sub(sigma_pattern, f'SIGMA={self.sigma}', content)
+                logger.info(f"Set SIGMA parameter to {self.sigma}")
             wandb.config.update(
                 {
-                    'opes/SIGMA': str(self.cfg.sigma)
+                    'opes/SIGMA': str(self.sigma)
                 },
                 allow_val_change=True
             )
             
             with open(target_plumed, 'w') as f:
                 f.write(content)
-            logger.info(f"Created symbolic links and modified PLUMED configuration: {target_plumed}")
+            logger.info(f"Copied model and modified PLUMED configuration: {target_plumed}")
             
         except Exception as e:
             logger.error(f"Error modifying PLUMED file: {e}")
@@ -125,12 +123,12 @@ class OPESSimulationRunner:
         plumed_file: Path
     ) -> bool:
         seed_dir = self.log_dir / str(seed)
-        gpu_id = self.cfg.gpu
+        gpu_id = seed
         
         # GROMACS command
         cmd = [
             "gmx", "mdrun",
-            "-s", f"./simulations/{self.molecule}/data/nvt_0.tpr",
+            "-s", f"./data/{self.molecule.upper()}/nvt_0.tpr",
             "-deffnm", str(seed_dir),
             "-plumed", str(plumed_file),
             "-nsteps", str(self.step),
@@ -139,8 +137,6 @@ class OPESSimulationRunner:
             "-nb", "gpu",
             "-bonded", "gpu",
         ]
-        if self.background:
-            cmd += [ "&" ]
         
         env = os.environ.copy()
         env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
@@ -191,7 +187,11 @@ class OPESSimulationRunner:
     def run_simulations(
         self
     ):
-        logger.info(f"Starting {self.max_seed + 1} simulations")
+        """
+        Run multiple GROMACS simulations in parallel for different seeds.
+        Each simulation runs independently and all are monitored until completion.
+        """
+        logger.info(f"Starting {self.max_seed + 1} simulations in parallel")
         processes = []
         
         # Start all simulations
@@ -200,15 +200,27 @@ class OPESSimulationRunner:
             process = self.run_gromacs_simulation(seed, plumed_file)
             if process:
                 processes.append((seed, process))
+                logger.info(f"Started simulation for seed {seed} (PID: {process.pid})")
+            else:
+                logger.error(f"Failed to start simulation for seed {seed}")
             time.sleep(1)  # Small delay between starts
+        
+        if not processes:
+            logger.error("No simulations were started successfully")
+            return
+        
+        logger.info(f"Successfully started {len(processes)} simulations")
         
         # Wait for all simulations to complete
         logger.info("Waiting for all GROMACS simulations to complete...")
         completed_successfully = []
         failed_simulations = []
         
-        for seed, process in processes:
+        # Monitor all processes
+        total_processes = len(processes)
+        for i, (seed, process) in enumerate(processes):
             try:
+                logger.info(f"Waiting for seed {seed} to complete... ({i+1}/{total_processes})")
                 stdout, stderr = process.communicate()
                 if process.returncode == 0:
                     logger.info(f"GROMACS simulation completed successfully for seed {seed}")
@@ -232,25 +244,6 @@ class OPESSimulationRunner:
             logger.warning(f"Failed seeds: {failed_simulations}")
         
         logger.info("All GROMACS simulations finished!")
-    
-    def run_analysis(
-        self
-    ):
-        logger.info("Starting analysis")
-        
-        # Create analysis directory
-        analysis_dir = self.log_dir / "analysis"
-        analysis_dir.mkdir(parents=True, exist_ok=True)
-        
-        try:
-            # plot_free_energy_curve(self.cfg, self.log_dir, self.max_seed, analysis_dir)
-            plot_rmsd_analysis(self.cfg, self.log_dir, self.max_seed, analysis_dir)
-            plot_tica_scatter(self.cfg, self.log_dir, self.max_seed, analysis_dir)
-            plot_cv_over_time(self.cfg, self.log_dir, self.max_seed, analysis_dir, self.mlcv_dir)
-            
-        except Exception as e:
-            logger.error(f"Error during analysis: {e}")
-            raise
     
     def setup_wandb(
         self
@@ -310,8 +303,7 @@ class OPESSimulationRunner:
         try:
             self.setup_wandb()
             self.run_simulations()
-            # self.run_analysis()
-            logger.info("OPES simulation and analysis completed!")
+            logger.info("OPES simulation completed!")
             
         except Exception as e:
             logger.error(f"Error during execution: {e}")

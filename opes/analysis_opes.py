@@ -37,80 +37,91 @@ logger = logging.getLogger(__name__)
 def gmx_process_trajectory(
     log_dir: Path,
     analysis_dir: Path,
-    seed: int
+    max_seed: int
 ):
     """Post process trajectory."""
     
-    # GROMACS command for post procesing trajectory with trjconv
-    cmd = [
-        "gmx", "trjconv",
-        "-f", f"{log_dir}/{seed}.xtc",
-        "-pbc", "nojump",
-        "-o", f"{analysis_dir}/{seed}_tc.xtc",
-    ]
-    
-    # Run and wait for completion
-    print(f"Running command: {' '.join(cmd)}")
-    try:
-        process = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True
-        )
-        if process.returncode == 0:
-            print("✓ gmx trjconv completed successfully")
-            print(f"Created trjconv file: {analysis_dir}/{seed}_tc.xtc")
-        else:
-            print(f"✗ gmx trjconv failed with return code {process.returncode}")
-        if process.stdout:
-            print("STDOUT:", process.stdout)
-        if process.stderr:
-            print("GROMACSOUT:", process.stderr)
-            
-    except subprocess.CalledProcessError as e:
-        print(f"gmx trjconv failed: {e}")
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Post processing trajectory"
+    )
+    for seed in pbar:
+        # GROMACS command for post procesing trajectory with trjconv
+        cmd = [
+            "gmx", "trjconv",
+            "-f", f"{log_dir}/{seed}.xtc",
+            "-pbc", "nojump",
+            "-o", f"{analysis_dir}/{seed}_tc.xtc",
+        ]
+        
+        # Run and wait for completion
+        print(f"Running command: {' '.join(cmd)}")
+        try:
+            process = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True
+            )
+            if process.returncode == 0:
+                print(f"✓ gmx trjconv completed successfully, seed {seed}")
+                print(f"Created trjconv file: {analysis_dir}/{seed}_tc.xtc")
+            else:
+                print(f"✗ gmx trjconv failed with return code {process.returncode}, seed {seed}")
+            if process.stdout:
+                print(f"STDOUT:, seed {seed}:", process.stdout)
+            if process.stderr:
+                print(f"GROMACSOUT:, seed {seed}:", process.stderr)
+                
+        except subprocess.CalledProcessError as e:
+            print(f"gmx trjconv failed, seed {seed}: {e}")
     
     
 def gmx_process_energy(
     log_dir: Path,
     analysis_dir: Path,
-    seed: int,
+    max_seed: int,
 ):
     """Compute energy from trajectory data."""
     
     # GROMACS command for energy calculation
-    cmd = [
-        "gmx", "energy",
-        "-f", f"{log_dir}/{seed}.edr", 
-        "-o", f"{analysis_dir}/{seed}.xvg",
-        '-xvg', 'none'
-    ]
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Computing energy"
+    )
+    for seed in pbar:
+        cmd = [
+            "gmx", "energy",
+            "-f", f"{log_dir}/{seed}.edr", 
+            "-o", f"{analysis_dir}/{seed}.xvg",
+            '-xvg', 'none'
+        ]
 
-    print(f"Running command: {' '.join(cmd)}")
-    try:
-        process = subprocess.run(
-            cmd,
-            input="16 17 9 0\\n",
-            capture_output=True,
-            text=True
-        )
-        if process.returncode == 0:
-            print("✓ gmx energy completed successfully")
-            print(f"Created energy file: {analysis_dir}/{seed}.xvg")
-        else:
-            print(f"✗ gmx energy failed with return code {process.returncode}")
-        if process.stdout:
-            print("STDOUT:", process.stdout)
-        if process.stderr:
-            print("GROMACSOUT:", process.stderr)
-            
-    except subprocess.CalledProcessError as e:
-        print(f"gmx energy failed: {e}")
+        print(f"Running command: {' '.join(cmd)}")
+        try:
+            process = subprocess.run(
+                cmd,
+                input="16 17 9 0\\n",
+                capture_output=True,
+                text=True
+            )
+            if process.returncode == 0:
+                print(f"✓ gmx energy completed successfully, seed {seed}")
+                print(f"Created energy file: {analysis_dir}/{seed}.xvg")
+            else:
+                print(f"✗ gmx energy failed with return code {process.returncode}, seed {seed}")
+            if process.stdout:
+                print(f"STDOUT:, seed {seed}:", process.stdout)
+            if process.stderr:
+                print(f"GROMACSOUT:, seed {seed}:", process.stderr)
+                
+        except subprocess.CalledProcessError as e:
+            print(f"gmx energy failed, seed {seed} : {e}")
 
 
 
 def compute_cv_values(
     cfg,
+    max_seed: int,
     batch_size=10000,
 ):
     """
@@ -123,9 +134,10 @@ def compute_cv_values(
     Returns:
         tuple: cv_values
     """
+    print(f"> Computing CV values")
     try:
         base_simulation_dir = Path(f"{os.getcwd()}/simulations") / cfg.molecule / cfg.method
-        seed_dir = base_simulation_dir / f"{cfg.date}/{cfg.seed}"
+        seed_dir = base_simulation_dir / f"{cfg.date}/{max_seed}"
         jit_files = list(seed_dir.glob("*-jit.pt"))
         if not jit_files:
             raise FileNotFoundError(f"No -jit.pt files found in {seed_dir}")
@@ -185,9 +197,15 @@ def plot_pmf(
     all_cv_grids = []
     all_pmfs = []
     
-    print(f"> Computing OPES PMF")
     # Check CV range
-    for seed in range(max_seed + 1):
+    print(f"> Computing OPES PMF CVs range")
+    cv_mins = []
+    cv_maxs = []
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Checking CV range"
+    )
+    for seed in pbar:
         colvar_file = log_dir / f"{seed}" / "COLVAR"
         if not colvar_file.exists():
             logger.warning(f"COLVAR file not found: {colvar_file}")
@@ -196,13 +214,19 @@ def plot_pmf(
         cv = colvar_data[:, 1]
         cv_grid = np.arange(cv.min(), cv.max() + sigma / 2, sigma)
         all_cv_grids.append(cv_grid)
-    all_cv_grids = np.array(all_cv_grids)
-    cv_grid_min = np.min(all_cv_grids)
-    cv_grid_max = np.max(all_cv_grids)
+        cv_mins.append(cv.min())
+        cv_maxs.append(cv.max())
+    cv_grid_min = np.min(cv_mins) if len(cv_mins) > 0 else 0.0
+    cv_grid_max = np.max(cv_maxs) if len(cv_maxs) > 0 else 0.0
     cv_grid = np.arange(cv_grid_min - sigma / 2, cv_grid_max + sigma / 2, sigma)
     
     # Compute PMF
-    for seed in range(max_seed + 1):
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Computing OPES PMF"
+    )
+    for seed in pbar:
+        colvar_file = log_dir / f"{seed}" / "COLVAR"
         colvar_data = np.genfromtxt(colvar_file, skip_header=1)
         cv = colvar_data[:, 1]
         bias = colvar_data[:, 2]
@@ -245,7 +269,7 @@ def plot_pmf(
         color=blue, linewidth=4,
     )
     ax.fill_between(
-        cv_grid, mean_pmf - std_pmf, mean_pmf + std_pmf,\
+        cv_grid, mean_pmf - std_pmf, mean_pmf + std_pmf,
         alpha=0.2, color=blue, linewidth=1
     )
     for idx, pmf in enumerate(all_pmfs):
@@ -281,16 +305,20 @@ def plot_free_energy_curve(
 ):
     # ns_per_step = 0.004
     # skip_steps = 50000
-    skip_steps = 0
-    unit_steps = 25000
-    equil_temp = 340
+    skip_steps = cfg.analysis.skip_steps
+    unit_steps = cfg.analysis.unit_steps
+    equil_temp = cfg.analysis.equil_temp
     all_times = []
     all_cvs = []
     all_delta_fs = []
     
     # Compute Delta F
     print(f"> Computing Delta F")
-    for seed in range(max_seed + 1):
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Computing Delta F"
+    )
+    for seed in pbar:
         colvar_file = log_dir / f"{seed}" / "COLVAR"
         try:
             colvar_data = np.genfromtxt(colvar_file, skip_header=1)
@@ -299,7 +327,7 @@ def plot_free_energy_curve(
             bias = colvar_data[:, 2]
             total_steps = len(colvar_data)
             step_grid = np.arange(
-                skip_steps + unit_steps, total_steps + 1, unit_steps
+                skip_steps + unit_steps, total_steps, unit_steps
             )
             cv_thresh = [
                 -2, 0, 2
@@ -322,7 +350,7 @@ def plot_free_energy_curve(
                 Delta_Fs.append(Delta_F)
             Delta_Fs = np.array(Delta_Fs)
             all_delta_fs.append(Delta_Fs)
-        
+            
         except Exception as e:
             logger.warning(f"Error processing data for seed {seed}: {e}")
             continue
@@ -333,8 +361,9 @@ def plot_free_energy_curve(
     if np.all(np.isnan(all_delta_fs)):
         logger.warning("No valid data found for free energy analysis")
         return
-    mean_delta_fs = np.mean(all_delta_fs, axis=0)
-    std_delta_fs = np.std(all_delta_fs, axis=0)
+    all_delta_fs[~np.isfinite(all_delta_fs)] = np.nan
+    mean_delta_fs = np.nanmean(all_delta_fs, axis=0)
+    std_delta_fs  = np.nanstd(all_delta_fs, axis=0)
     time_axis = all_times[0]
     
     # Compute reference Delta F
@@ -418,7 +447,11 @@ def plot_rmsd_analysis(
         ref_pdb_path = f"./data/{cfg.molecule.upper()}/folded.pdb"
         ref_traj = md.load_pdb(ref_pdb_path)
         
-        for seed in range(max_seed + 1):
+        pbar = tqdm(
+            range(max_seed + 1),
+            desc="Computing RMSD"
+        )
+        for seed in pbar:
             traj_file = log_dir / "analysis" / f"{seed}_tc.xtc"
 
             # Load trajectory and compute RMSD
@@ -507,7 +540,11 @@ def plot_tica_scatter(
             tica_coord_full = None
         
         # Process simulation trajectory
-        for seed in range(max_seed + 1):
+        pbar = tqdm(
+            range(max_seed + 1),
+            desc="Computing TICA scatter"
+        )
+        for seed in pbar:
             # Load trajectory data
             traj_file = log_dir / f"{seed}.xtc"
             if not traj_file.exists()   :
@@ -539,7 +576,7 @@ def plot_tica_scatter(
                 plt.colorbar(h[3], ax=ax, label='Log Density')
             ax.scatter(
                 tica_coord[:, 0], tica_coord[:, 1], 
-                c=blue, s=2, alpha=0.5,
+                color=blue, s=2, alpha=0.5,
             )
             ax.set_xlabel("TIC 1")
             ax.set_ylabel("TIC 2")
@@ -567,8 +604,11 @@ def plot_cv_over_time(
     """Plot CV values over time for simulation trajectories"""
     logger.info("Creating CV over time plots...")
     
-    
-    for seed in range(max_seed + 1):
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Computing CV over time"
+    )
+    for seed in pbar:
         try:
             colvar_file = log_dir / f"{seed}" / "COLVAR"
             if not colvar_file.exists():
@@ -581,7 +621,7 @@ def plot_cv_over_time(
             # Create plots
             fig = plt.figure(figsize=(5, 3))
             ax = fig.add_subplot(111)
-            ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, c=blue)
+            ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, color=blue)
             ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
             ax.set_yticks([-1, -0.5, 0, 0.5, 1])
             ax.set_xlabel("Time (ns)")
@@ -619,6 +659,8 @@ def main(cfg):
     log_dir = base_simulation_dir / cfg.date
     analysis_dir = log_dir / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
+    max_seed = cfg.opes.max_seed
+    sigma = cfg.opes.sigma
     
     # Initialize wandb
     config = OmegaConf.to_container(cfg)
@@ -630,27 +672,24 @@ def main(cfg):
     )
     
     try:
-        # Post process
         # logger.info("Post processing trajectory...")
-        # post_process_trajectory(log_dir, analysis_dir, cfg.seed)
+        # gmx_process_trajectory(log_dir, analysis_dir, max_seed)
+        # gmx_process_energy(log_dir, analysis_dir, max_seed)
         
-        # logger.info("Creating energy files with GROMACS and PLUMED...")
-        # compute_energy(log_dir, analysis_dir, cfg.seed)
-        
-        # # Run analysis functions
+        # Run analysis functions
         # logger.info("Running CV over time analysis...")
-        # plot_cv_over_time(cfg, log_dir, cfg.seed, analysis_dir)
+        # plot_cv_over_time(cfg, log_dir, max_seed, analysis_dir)
         
         # logger.info("Running RMSD analysis...")
-        # plot_rmsd_analysis(cfg, log_dir, cfg.seed, analysis_dir)
+        # plot_rmsd_analysis(cfg, log_dir, max_seed, analysis_dir)
         
         # logger.info("Running TICA scatter analysis...")
-        # plot_tica_scatter(cfg, log_dir, cfg.seed, analysis_dir)
+        # plot_tica_scatter(cfg, log_dir, max_seed, analysis_dir)
         
         logger.info("Running free energy analysis...")
-        reference_cvs = compute_cv_values(cfg, batch_size=10000)
-        plot_free_energy_curve(cfg, log_dir, cfg.seed, analysis_dir, reference_cvs)
-        plot_pmf(cfg, 0.02, log_dir, cfg.seed, analysis_dir, reference_cvs)
+        reference_cvs = compute_cv_values(cfg, max_seed, batch_size=10000)
+        plot_free_energy_curve(cfg, log_dir, max_seed, analysis_dir, reference_cvs)
+        plot_pmf(cfg, sigma, log_dir, max_seed, analysis_dir, reference_cvs)
         
         logger.info("Analysis completed successfully!")
         
