@@ -1,3 +1,6 @@
+# CLN025
+# 2JOF
+# 2F4K
 
 for molecule in 2JOF; do
     python all_cv.py --method tda --molecule $molecule
