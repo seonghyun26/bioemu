@@ -1,7 +1,7 @@
 cd ../
 
 method=tda
-molecule=cln025
+molecule=${1:-"cln025"}
 date=$(date +%m%d_%H%M%S)
 echo $date
 
