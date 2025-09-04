@@ -27,7 +27,9 @@ if __name__ == "__main__":
     mlcv_model.eval()
     mlcv_model.to(device)
     
-    mlcv_save_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/dataset/{molecule.upper()}-all/{method}_mlcv.npy"
+    dataset_dir = Path(f"/home/shpark/prj-mlcv/lib/bioemu/opes/dataset/{molecule.upper()}-all")
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    mlcv_save_path = dataset_dir / f"{method}_mlcv.npy"
     if os.path.exists(mlcv_save_path):
         print(f"> CV values already computed at {mlcv_save_path}")
         exit()
