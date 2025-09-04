@@ -60,6 +60,7 @@ if __name__ == "__main__":
             cv_batches[start_idx:end_idx] = batch_cv
     
     cv = cv_batches.detach().cpu().numpy()
+    print(f"\nMethod: {method}, Molecule: {molecule}")
     print(f"CV shape: {cv.shape}")
     print(f"CV range: [{cv.min():.6f}, {cv.max():.6f}]")
     print(f"CV mean: {cv.mean():.6f}, std: {cv.std():.6f}")
