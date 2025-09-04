@@ -23,7 +23,7 @@ IMG_DIR="$PROJECT_ROOT/img/$MOLECULE"
 mkdir -p "$IMG_DIR"
 
 # Python script path
-PYTHON_SCRIPT="$PROJECT_ROOT/analysis-cv.py"
+PYTHON_SCRIPT="$PROJECT_ROOT/analysis_cv.py"
 
 echo "========================================"
 echo "Running CV Analysis"

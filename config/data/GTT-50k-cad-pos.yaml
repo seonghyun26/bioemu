@@ -1,0 +1,7 @@
+sequence: GSKLPPGWEKRMSRDGRVYYFNHITGTTQFERPSG
+input_dim: 595
+system_id: GTT
+time_lag: 10
+representation: cad-pos
+dataset_size: 50k
+data_dir: /home/shpark/prj-mlcv/lib/DESRES/dataset

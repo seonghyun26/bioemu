@@ -4,6 +4,7 @@ ckpt_dir: _baseline_
 ckpt_path: tica-CLN025
 date: debug
 tags: ['opes']
+start_gpu: 0
 opes:
   step: 500_000_000
   sigma: 0.05

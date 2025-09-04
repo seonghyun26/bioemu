@@ -1,0 +1,5 @@
+defaults:
+- data: GTT-50k-cad-pos
+- log: basic
+- model: input-score
+- sample: basic

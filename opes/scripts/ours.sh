@@ -1,18 +1,18 @@
 cd ../
 
 method=ours
-molecule=cln025
+molecule=2jof
 date=$(date +%m%d_%H%M%S)
-date="0830_162102"
 echo $date
 
 python main.py \
     --config-name $method-$molecule \
-    opes.step=400_000_000 \
+    opes.step=500_000_000 \
     date=$date \
-    +tags=['vast']
+    ++start_gpu=4 \
+    +tags=['svr']
 
 python analysis_opes.py \
     --config-name $method \
     date=$date \
-    +tags=['vast']
+    +tags=['svr']

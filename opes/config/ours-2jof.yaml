@@ -1,9 +1,10 @@
 molecule: 2jof
 method: ours
 ckpt_dir: '.'
-ckpt_path: 2jof
+ckpt_path: 0814_073849-2JOF
 date: debug
 tags: ['opes']
+start_gpu: 0
 opes:
   step: 500_000_000
   sigma: 0.05

@@ -123,7 +123,7 @@ class OPESSimulationRunner:
         plumed_file: Path
     ) -> bool:
         seed_dir = self.log_dir / str(seed)
-        gpu_id = seed
+        gpu_id = seed + self.cfg.start_gpu
         
         # GROMACS command
         cmd = [

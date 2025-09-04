@@ -808,7 +808,7 @@ def plot_committor_analysis(
         correlation_spearman, p_value_spearman = spearmanr(committor_value, cv[:, cv_dim])
         correlation_text = f'Pearson r = {correlation_pearson:.4f}\nSpearman ρ = {correlation_spearman:.4f}'
         ax.text(
-            0.35, 0.1,
+            1.05, 0.5,
             correlation_text,
             transform=ax.transAxes, 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
@@ -863,10 +863,16 @@ def plot_rmsd_analysis(
         correlation_unfolded_p, p_value_unfolded_p = pearsonr(rmsd_unfolded, cv[:, cv_dim])
         correlation_folded_s, p_value_folded_s = spearmanr(rmsd, cv[:, cv_dim])
         correlation_unfolded_s, p_value_unfolded_s = spearmanr(rmsd_unfolded, cv[:, cv_dim])
-        correlation_text = (f'Folded: Pearson r = {correlation_folded_p:.4f}, Spearman ρ = {correlation_folded_s:.4f}\n'
-                           f'Unfolded: Pearson r = {correlation_unfolded_p:.4f}, Spearman ρ = {correlation_unfolded_s:.4f}')
+        correlation_text = (
+            f'<b>Folded</b>\n'
+            f'Pearson r = {correlation_folded_p:.4f}\n'
+            f'Spearman ρ = {correlation_folded_s:.4f}\n'
+            f'<b>Unfolded</b>\n'
+            f'Pearson r = {correlation_unfolded_p:.4f}\n'
+            f'Spearman ρ = {correlation_unfolded_s:.4f}'
+        )
         ax.text(
-            0.4, 0.85, correlation_text, transform=ax.transAxes, 
+            1.05, 0.5, correlation_text, transform=ax.transAxes, 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
             verticalalignment='top', fontsize=10
         )
