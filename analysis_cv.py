@@ -124,7 +124,7 @@ def load_model_and_data(
             date = date or "0819_173704"
         
         else:
-            raise ValueError(f"Invalid molecule: {molecule}")
+            raise ValueError(f"Invalid molecule: {molecule} for {model_type}")
         
         save_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/mlcv_model-jit.pt"
         mlcv_model = torch.jit.load(save_path, map_location=f"cuda:{CUDA_DEVICE}")
@@ -864,10 +864,10 @@ def plot_rmsd_analysis(
         correlation_folded_s, p_value_folded_s = spearmanr(rmsd, cv[:, cv_dim])
         correlation_unfolded_s, p_value_unfolded_s = spearmanr(rmsd_unfolded, cv[:, cv_dim])
         correlation_text = (
-            f'<b>Folded</b>\n'
+            f'<Folded>\n'
             f'Pearson r = {correlation_folded_p:.4f}\n'
             f'Spearman ρ = {correlation_folded_s:.4f}\n'
-            f'<b>Unfolded</b>\n'
+            f'<Unfolded>\n'
             f'Pearson r = {correlation_unfolded_p:.4f}\n'
             f'Spearman ρ = {correlation_unfolded_s:.4f}'
         )
@@ -1200,6 +1200,12 @@ def plot_per_residue_violin_analysis(
         selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
     elif molecule == "2F4K":
         selected_residues = [2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+    elif molecule == "1FME":
+        selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+    elif molecule == "2F21":
+        selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38]
+    elif molecule == "2HBA":
+        selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
     else:
         print(f"No specific residues defined for molecule {molecule}, skipping per-residue analysis")
         return
@@ -1455,7 +1461,7 @@ def main():
     parser = argparse.ArgumentParser(description='Run CV analysis for different model types')
     parser.add_argument('--model_type', choices=['mlcv', 'mlcv-trans', 'tda', 'tica', 'tae', 'vde', 'all'], default='all',
                         help='Model type to analyze')
-    parser.add_argument('--molecule', choices=['CLN025', '2JOF', '2F4K'], default='CLN025',
+    parser.add_argument('--molecule', choices=['CLN025', '2JOF', '2F4K', '1FME', '2F21', '2HBA'], default='CLN025',
                         help='Molecule to analyze')
     parser.add_argument('--date', type=str, default=None,
                         help='Date string for MLCV model (only used for mlcv)')
@@ -1491,7 +1497,7 @@ def main():
             # Load reference structure
             reference_pdb_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{args.molecule}/folded.pdb"
             reference_cad = None
-            if args.molecule in ["CLN025","2JOF","2F4K"] and os.path.exists(reference_pdb_path):
+            if args.molecule in ["CLN025","2JOF","2F4K","1FME","2F21","2HBA"] and os.path.exists(reference_pdb_path):
                 reference_cad = load_reference_structure(reference_pdb_path, tica_wrapper)
                 print(f"Loaded reference structure from {reference_pdb_path}")
             else:

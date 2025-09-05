@@ -1,0 +1,5 @@
+defaults:
+- data: NTL9-50k-cad-pos
+- log: basic
+- model: input-score
+- sample: basic

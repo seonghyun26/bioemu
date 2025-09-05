@@ -1,0 +1,15 @@
+molecule: 2f4k
+method: ours
+ckpt_dir: _baseline_
+ckpt_path: ours-2F4K
+date: debug
+tags: ['opes']
+start_gpu: 0
+opes:
+  step: 500_000_000
+  sigma: 0.05
+  max_seed: 3
+analysis:
+  skip_steps: 50000
+  unit_steps: 25000
+  equil_temp: 325

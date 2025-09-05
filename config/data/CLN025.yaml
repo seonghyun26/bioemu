@@ -1,7 +1,0 @@
-sequence: YYDPETGTWY
-input_dim: 45
-system_id: CLN025
-time_lag: 10
-representation: cad
-dataset_size: 5k
-data_dir: /home/shpark/prj-mlcv/lib/DESRES/dataset
