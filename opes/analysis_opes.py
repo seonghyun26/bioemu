@@ -680,8 +680,8 @@ def main(cfg):
     
     try:
         # logger.info("Post processing trajectory...")
-        # gmx_process_trajectory(log_dir, analysis_dir, max_seed)
-        # gmx_process_energy(log_dir, analysis_dir, max_seed)
+        gmx_process_trajectory(log_dir, analysis_dir, max_seed)
+        gmx_process_energy(log_dir, analysis_dir, max_seed)
         
         # Run analysis functions
         logger.info("Running CV over time analysis...")

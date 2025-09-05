@@ -134,12 +134,18 @@ class OPESSimulationRunner:
             "-nsteps", str(self.step),
             "-reseed", str(seed),
             "-ntomp", "1",
-            "-nb", "gpu",
+            "-pme", "gpu",
             "-bonded", "gpu",
+            "-nb", "gpu",
+            "-pin", "on"
+            # "-tunepme",
+            # "-update", "gpu",
+            # "-dlb"
         ]
         
         env = os.environ.copy()
         env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+        env['GMX_CUDA_GRAPH'] = "1"
         logger.info(f"Running GROMACS simulation for seed {seed} on GPU {gpu_id}")
         logger.info(f"Command: {' '.join(cmd)}")
         
