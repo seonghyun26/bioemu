@@ -59,7 +59,7 @@ green = (100 / 255, 170 / 255, 120 / 255)
 CUDA_DEVICE = get_available_cuda_device()
 COLORS = ['blue', 'red', 'green', 'orange', 'purple', 'cyan', 'brown', 'magenta']
 SQUARE_FIGSIZE = (4, 4)
-RECTANGLE_FIGSIZE = (6, 4)
+RECTANGLE_FIGSIZE = (5, 4)
 BIG_RECTANGLE_FIGSIZE = (12, 6)
 
 # Load components
@@ -98,21 +98,23 @@ def load_model_and_data(
     molecule,
     date=None,
 ):
-    """Load model and data based on type."""
+    """Load models and return data paths instead of loading large tensors into memory/GPU."""
     simulation_idx = 0
     data_paths = {
         'pos': f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-{simulation_idx}-protein/{molecule}-{simulation_idx}-pos.pt",
         'cad': f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-{simulation_idx}-protein/{molecule}-{simulation_idx}-cad.pt",
         'cad-switch': f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-{simulation_idx}-protein/{molecule}-{simulation_idx}-cad-switch.pt"
     }
-    pos_torch = torch.load(data_paths['pos']).to(f"cuda:{CUDA_DEVICE}")
-    cad_torch = torch.load(data_paths['cad']).to(f"cuda:{CUDA_DEVICE}")
-    cad_switch_torch = torch.load(data_paths['cad-switch']).to(f"cuda:{CUDA_DEVICE}")
+    # Do not load big tensors here; return paths for batch-wise processing later
+    pos_path = data_paths['pos'] if molecule == "CLN025" else None
+    cad_switch_path = data_paths['cad-switch'] if molecule == "CLN025" else None
+    cad_path = data_paths['cad']
     if molecule == "CLN025":
         TICA_SWITCH = True
     else:
         TICA_SWITCH = False
     
+    model_root_path = "/home/shpark/prj-mlcv/lib/bioemu/opes/model/_baseline_"
     if model_type == "mlcv":
         if molecule == "CLN025":
             date = date or "0816_171833"
@@ -122,38 +124,53 @@ def load_model_and_data(
         
         elif molecule == "2F4K":
             date = date or "0819_173704"
+            
+        elif molecule == "1FME":
+            date = date or "0904_160804"
+        
+        elif molecule == "GTT":
+            date = date or "0905_160702"
+            
+        elif molecule == "NTL9":
+            date = date or "0905_054344"
         
         else:
             raise ValueError(f"Invalid molecule: {molecule} for {model_type}")
         
+        device_str = f"cuda:{CUDA_DEVICE}" if torch.cuda.is_available() else "cpu"
         save_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/mlcv_model-jit.pt"
-        mlcv_model = torch.jit.load(save_path, map_location=f"cuda:{CUDA_DEVICE}")
+        mlcv_model = torch.jit.load(save_path, map_location=device_str)
         mlcv_model.eval()
     
     elif model_type == "mlcv-trans":
         date = date or "0825_072649"
+        device_str = f"cuda:{CUDA_DEVICE}" if torch.cuda.is_available() else "cpu"
         save_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/mlcv_model-jit.pt"
-        mlcv_model = torch.jit.load(save_path, map_location=f"cuda:{CUDA_DEVICE}")
+        mlcv_model = torch.jit.load(save_path, map_location=device_str)
         mlcv_model.eval()
     
     elif model_type == "tda":
-        tda_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/_baseline_/tda-{molecule}-jit.pt"
-        mlcv_model = torch.jit.load(tda_path, map_location=f"cuda:{CUDA_DEVICE}")
+        tda_path = f"{model_root_path}/tda-{molecule}-jit.pt"
+        device_str = f"cuda:{CUDA_DEVICE}" if torch.cuda.is_available() else "cpu"
+        mlcv_model = torch.jit.load(tda_path, map_location=device_str)
         mlcv_model.eval()
     
     elif model_type == "tica":
-        tica_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/_baseline_/tica-{molecule}-jit.pt"
-        mlcv_model = torch.jit.load(tica_path, map_location=f"cuda:{CUDA_DEVICE}")
+        tica_path = f"{model_root_path}/tica-{molecule}-jit.pt"
+        device_str = f"cuda:{CUDA_DEVICE}" if torch.cuda.is_available() else "cpu"
+        mlcv_model = torch.jit.load(tica_path, map_location=device_str)
         mlcv_model.eval()
         
     elif model_type == "tae":
-        tae_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/_baseline_/tae-{molecule}-jit.pt"
-        mlcv_model = torch.jit.load(tae_path, map_location=f"cuda:{CUDA_DEVICE}")
+        tae_path = f"{model_root_path}/tae-{molecule}-jit.pt"
+        device_str = f"cuda:{CUDA_DEVICE}" if torch.cuda.is_available() else "cpu"
+        mlcv_model = torch.jit.load(tae_path, map_location=device_str)
         mlcv_model.eval()
         
     elif model_type == "vde":
-        vde_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/_baseline_/vde-{molecule}-jit.pt"
-        mlcv_model = torch.jit.load(vde_path, map_location=f"cuda:{CUDA_DEVICE}")
+        vde_path = f"{model_root_path}/vde-{molecule}-jit.pt"
+        device_str = f"cuda:{CUDA_DEVICE}" if torch.cuda.is_available() else "cpu"
+        mlcv_model = torch.jit.load(vde_path, map_location=device_str)
         mlcv_model.eval()
         
     else:
@@ -172,10 +189,14 @@ def load_model_and_data(
     )
     
     # Load committor model
-    committor_path = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025/committor.pt"
-    committor_model = torch.jit.load(committor_path, map_location=f"cuda:{CUDA_DEVICE}")
+    if molecule == "CLN025":
+        committor_path = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025/committor.pt"
+        committor_model = torch.jit.load(committor_path, map_location=f"cuda:{CUDA_DEVICE}")
+    else:
+        committor_model = None
     
-    return mlcv_model, tica_wrapper, committor_model, pos_torch, cad_torch, cad_switch_torch
+    # Return models and data paths for batch-wise processing
+    return mlcv_model, tica_wrapper, committor_model, pos_path, cad_path, cad_switch_path
 
 def load_reference_structure(
     pdb_path,
@@ -195,74 +216,87 @@ def compute_cv_values(
     mlcv_model,
     cad_torch,
     model_type,
+    molecule,
     reference_cad=None,
     batch_size=10000,
+    device=None,
+    cache=True,
 ):
     """Compute CV values from the model with optional sign flipping using batch processing."""
-    dataset = TensorDataset(cad_torch)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    print(f"Computing CV values in batches of {batch_size}...")
+    cv_data_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/dataset/{molecule.upper()}-all/{model_type}_mlcv.npy"
+    if os.path.exists(cv_data_path):
+        print(f"> Using cached CV values from {cv_data_path}")
+        cv = np.load(cv_data_path)
     
-    with torch.no_grad():
-        sample_batch = next(iter(dataloader))[0]
-        sample_output = mlcv_model(sample_batch)
-        output_dim = sample_output.shape[1]
-    cv_batches = torch.zeros((len(cad_torch), output_dim)).to(cad_torch.device)
-    
-    with torch.no_grad():
-        for batch_idx, (batch_data,) in enumerate(tqdm(
-            dataloader,
-            desc="Computing CV values",
-            total=len(dataloader),
-            leave=False,
-        )):
-            batch_cv = mlcv_model(batch_data)
-            start_idx = batch_idx * batch_size
-            end_idx = start_idx + batch_cv.shape[0]  # Handle last batch size correctly
-            cv_batches[start_idx:end_idx] = batch_cv
-    
-    cv = cv_batches.detach().cpu().numpy()
-    MLCV_DIM = cv.shape[1]
-    
-    print(f"CV computation complete. Shape: {cv.shape}")
-    
-    if model_type == "mlcv":
-        # Normalize CV values for MLCV
-        cv_normalized = np.zeros_like(cv)
+    else:
+        cad_torch = torch.load(cad_torch).to(device)
+        dataset = TensorDataset(cad_torch)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        print(f"Computing CV values in batches of {batch_size}...")
         
-        for cv_dim in range(MLCV_DIM):
-            cv_dim_val = cv[:, cv_dim]
-            cv_range_min, cv_range_max = cv_dim_val.min(), cv_dim_val.max()
-            cv_range_mean = (cv_range_min + cv_range_max) / 2.0
-            cv_range = (cv_range_max - cv_range_min) / 2.0
-            cv_normalized[:, cv_dim] = (cv_dim_val - cv_range_mean) / cv_range
-        
-        cv = cv_normalized
-        
-    # Additional sign flipping based on reference structure
-    if reference_cad is not None:
         with torch.no_grad():
-            ref_cv = mlcv_model(torch.from_numpy(reference_cad).to(cad_torch.device))
-            ref_cv = ref_cv.detach().cpu().numpy()
+            sample_batch = next(iter(dataloader))[0]
+            sample_output = mlcv_model(sample_batch)
+            output_dim = sample_output.shape[1]
+        cv_batches = torch.zeros((len(cad_torch), output_dim)).to(cad_torch.device)
         
-        # Normalize reference CV the same way
+        with torch.no_grad():
+            for batch_idx, (batch_data,) in enumerate(tqdm(
+                dataloader,
+                desc="Computing CV values",
+                total=len(dataloader),
+                leave=False,
+            )):
+                batch_cv = mlcv_model(batch_data)
+                start_idx = batch_idx * batch_size
+                end_idx = start_idx + batch_cv.shape[0]  # Handle last batch size correctly
+                cv_batches[start_idx:end_idx] = batch_cv
+        
+        cv = cv_batches.detach().cpu().numpy()
+        MLCV_DIM = cv.shape[1]
+        
+        print(f"CV computation complete. Shape: {cv.shape}")
+        
         if model_type == "mlcv":
-            ref_cv_normalized = np.zeros_like(ref_cv)
+            # Normalize CV values for MLCV
+            cv_normalized = np.zeros_like(cv)
+            
             for cv_dim in range(MLCV_DIM):
-                ref_cv_dim_val = ref_cv[:, cv_dim]
                 cv_dim_val = cv[:, cv_dim]
                 cv_range_min, cv_range_max = cv_dim_val.min(), cv_dim_val.max()
                 cv_range_mean = (cv_range_min + cv_range_max) / 2.0
                 cv_range = (cv_range_max - cv_range_min) / 2.0
-                ref_cv_normalized[:, cv_dim] = (ref_cv_dim_val - cv_range_mean) / cv_range
-            ref_cv = ref_cv_normalized
+                cv_normalized[:, cv_dim] = (cv_dim_val - cv_range_mean) / cv_range
+            
+            cv = cv_normalized
+            
+        # Additional sign flipping based on reference structure
+        if reference_cad is not None:
+            with torch.no_grad():
+                ref_cv = mlcv_model(torch.from_numpy(reference_cad).to(cad_torch.device))
+                ref_cv = ref_cv.detach().cpu().numpy()
+            
+            # Normalize reference CV the same way
+            if model_type == "mlcv":
+                ref_cv_normalized = np.zeros_like(ref_cv)
+                for cv_dim in range(MLCV_DIM):
+                    ref_cv_dim_val = ref_cv[:, cv_dim]
+                    cv_dim_val = cv[:, cv_dim]
+                    cv_range_min, cv_range_max = cv_dim_val.min(), cv_dim_val.max()
+                    cv_range_mean = (cv_range_min + cv_range_max) / 2.0
+                    cv_range = (cv_range_max - cv_range_min) / 2.0
+                    ref_cv_normalized[:, cv_dim] = (ref_cv_dim_val - cv_range_mean) / cv_range
+                ref_cv = ref_cv_normalized
+            
+            # Flip signs to ensure reference CV is positive
+            for cv_dim in range(MLCV_DIM):
+                if ref_cv[0, cv_dim] < 0:
+                    cv[:, cv_dim] = -cv[:, cv_dim]
+                    print(f"Flipped sign for CV dimension {cv_dim} to ensure positive reference value")
+
+        np.save(cv_data_path, cv)
+        print(f"Saved CV values to {cv_data_path}")
         
-        # Flip signs to ensure reference CV is positive
-        for cv_dim in range(MLCV_DIM):
-            if ref_cv[0, cv_dim] < 0:
-                cv[:, cv_dim] = -cv[:, cv_dim]
-                print(f"Flipped sign for CV dimension {cv_dim} to ensure positive reference value")
-    
     return cv
 
 def foldedness_by_hbond(
@@ -510,13 +544,13 @@ def save_plot_dual_format(
         return False
     
     # Apply rasterization to plot elements if requested
-    if rasterized:
-        rasterize_plot_elements()
     
     # Save in both formats
     try:
         # Save as PNG
         if not os.path.exists(png_path):
+            if rasterized:
+                rasterize_plot_elements()
             plt.savefig(
                 png_path,
                 dpi=dpi,
@@ -544,7 +578,6 @@ def save_plot_dual_format(
 
 
 # Plots
-
 def plot_tica_cv_analysis(
     cv,
     tica_data,
@@ -853,7 +886,7 @@ def plot_rmsd_analysis(
         rmsd_unfolded = torch.load(rmsd_unfolded_path).numpy()
         
         # Scatter plot
-        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
+        fig = plt.figure(figsize=(6, 4))
         ax = fig.add_subplot(111)
         ax.scatter(rmsd, cv[:, cv_dim], color=blue, s=0.5, alpha=0.4, zorder=1)
         ax.scatter(rmsd_unfolded, cv[:, cv_dim], color=green, s=0.5, alpha=0.4, zorder=1)
@@ -1202,9 +1235,9 @@ def plot_per_residue_violin_analysis(
         selected_residues = [2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     elif molecule == "1FME":
         selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
-    elif molecule == "2F21":
+    elif molecule == "GTT":
         selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38]
-    elif molecule == "2HBA":
+    elif molecule == "NTL9":
         selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
     else:
         print(f"No specific residues defined for molecule {molecule}, skipping per-residue analysis")
@@ -1459,17 +1492,12 @@ def analyze_correlations(
 # MAIN
 def main():
     parser = argparse.ArgumentParser(description='Run CV analysis for different model types')
-    parser.add_argument('--model_type', choices=['mlcv', 'mlcv-trans', 'tda', 'tica', 'tae', 'vde', 'all'], default='all',
-                        help='Model type to analyze')
-    parser.add_argument('--molecule', choices=['CLN025', '2JOF', '2F4K', '1FME', '2F21', '2HBA'], default='CLN025',
-                        help='Molecule to analyze')
-    parser.add_argument('--date', type=str, default=None,
-                        help='Date string for MLCV model (only used for mlcv)')
-    parser.add_argument('--img_dir', type=str, default='/home/shpark/prj-mlcv/lib/bioemu/img',
-                        help='Directory to save images')
-    parser.add_argument('--cuda_device', type=int, default=None,
-                        help='CUDA device ID to use (e.g., 0, 1). If not specified, auto-detect available device')
-    
+    parser.add_argument('--model_type', choices=['mlcv', 'mlcv-trans', 'tda', 'tica', 'tae', 'vde', 'all'], default='all', help='Model type to analyze')
+    parser.add_argument('--molecule', choices=['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9'], default='CLN025', help='Molecule to analyze')
+    parser.add_argument('--date', type=str, default=None, help='Date string for MLCV model (only used for mlcv)')
+    parser.add_argument('--img_dir', type=str, default='/home/shpark/prj-mlcv/lib/bioemu/img/debug', help='Directory to save images')
+    parser.add_argument('--cuda_device', type=int, default=None, help='CUDA device ID to use (e.g., 0, 1). If not specified, auto-detect available device')
+    # parser.add_argument('--dssp_analysis', type=bool, default=False, help='Perform DSSP analysis')
     args = parser.parse_args()
     
     # Override global CUDA_DEVICE if specified
@@ -1480,10 +1508,10 @@ def main():
     
     # Create image directory if it doesn't exist
     os.makedirs(args.img_dir, exist_ok=True)
-    model_types = ['mlcv', 'mlcv-trans', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
+    # model_types = ['mlcv', 'mlcv-trans', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
+    model_types = ['mlcv', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
     
     for model_type in model_types:
-        
         try:
             print(f"\n{'='*60}")
             print(f"Running analysis for {model_type.upper()} - {args.molecule}")
@@ -1493,52 +1521,59 @@ def main():
             mlcv_model, tica_wrapper, committor_model, pos_torch, cad_torch, cad_switch_torch = load_model_and_data(
                 model_type, args.molecule, args.date
             )
+            print(f"Loaded model: {model_type}")
             
             # Load reference structure
             reference_pdb_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{args.molecule}/folded.pdb"
             reference_cad = None
-            if args.molecule in ["CLN025","2JOF","2F4K","1FME","2F21","2HBA"] and os.path.exists(reference_pdb_path):
+            if args.molecule in ["CLN025","2JOF","2F4K","1FME","GTT","NTL9"] and os.path.exists(reference_pdb_path):
                 reference_cad = load_reference_structure(reference_pdb_path, tica_wrapper)
                 print(f"Loaded reference structure from {reference_pdb_path}")
             else:
                 print(f"Reference structure not given, CV sign not aligned")
             
             # Compute CV values using batch processing
-            cv = compute_cv_values(mlcv_model, cad_torch, model_type, reference_cad, batch_size=10000)
+            cv = compute_cv_values(
+                mlcv_model,
+                cad_torch,
+                model_type,
+                molecule=args.molecule,
+                reference_cad=reference_cad,
+                batch_size=10000,
+                device=CUDA_DEVICE
+            )
             print(f"CV shape: {cv.shape}")
             print(f"CV range: {cv.max():.4f} to {cv.min():.4f}")
+            plot_cv_histogram(cv, model_type, args.molecule, args.img_dir, args.date)
             
             # Compute TICA coordinates
-            if args.molecule == "CLN025":
-                if cad_switch_torch.device.type == "cuda":
-                    cad_switch_torch = cad_switch_torch.cpu()
-                tica_data = tica_wrapper.transform(cad_switch_torch.numpy())
+            tica_coord_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/dataset/{args.molecule.upper()}-all/tica_lag10_coord.npy"
+            if os.path.exists(tica_coord_path):
+                print(f"> Using cached TICA coordinates from {tica_coord_path}")
+                tica_data = np.load(tica_coord_path)
             else:
-                if cad_torch.device.type == "cuda":
-                    cad_torch = cad_torch.cpu()
-                tica_data = tica_wrapper.transform(cad_torch.numpy())
+                if args.molecule == "CLN025":
+                    cad_switch_torch = cad_switch_torch.cpu() if cad_switch_torch.device.type == "cuda" else cad_switch_torch
+                    tica_data = tica_wrapper.transform(cad_switch_torch.numpy())
+                else:
+                    cad_torch = cad_torch.cpu() if cad_torch.device.type == "cuda" else cad_torch
+                    tica_data = tica_wrapper.transform(cad_torch.numpy())
             print(f"TICA shape: {tica_data.shape}")
-            
-            # Plot TICA-CV analysis
             plot_tica_cv_analysis(cv, tica_data, model_type, args.molecule, args.img_dir, args.date)
-            
-            # Plot CV-TICA analysis (2D histogram with CV as axes, TICA as colors)
-            plot_cv_tica_analysis(cv, tica_data, model_type, args.molecule, args.img_dir, args.date)
-            
-            # Plot CV histogram
-            plot_cv_histogram(cv, model_type, args.molecule, args.img_dir, args.date)
+            if cv.shape[1] > 1:
+                plot_cv_tica_analysis(cv, tica_data, model_type, args.molecule, args.img_dir, args.date)
             
             # RMSD analysis
             plot_rmsd_analysis(cv, args.molecule, model_type, args.img_dir, args.date)
             
             # DSSP analysis - load and filter data once
-            print(f"\nLoading DSSP data for {args.molecule}...")
-            dssp_data = load_and_filter_dssp_data(args.molecule)
-            plot_dssp_full_violin_analysis(cv, dssp_data, model_type, args.img_dir, args.date)
-            plot_dssp_simplified_violin_analysis(cv, dssp_data, model_type, args.img_dir, args.date)
-            plot_per_residue_violin_analysis(cv, dssp_data, model_type, args.molecule, args.img_dir, args.date)
-            plot_dssp_cv_heatmap(cv, dssp_data, model_type, args.img_dir, args.date)
-            plot_dssp_composition_heatmap(dssp_data, args.img_dir)
+            # print(f"\nLoading DSSP data for {args.molecule}...")
+            # dssp_data = load_and_filter_dssp_data(args.molecule)
+            # plot_dssp_full_violin_analysis(cv, dssp_data, model_type, args.img_dir, args.date)
+            # plot_dssp_simplified_violin_analysis(cv, dssp_data, model_type, args.img_dir, args.date)
+            # plot_per_residue_violin_analysis(cv, dssp_data, model_type, args.molecule, args.img_dir, args.date)
+            # plot_dssp_cv_heatmap(cv, dssp_data, model_type, args.img_dir, args.date)
+            # plot_dssp_composition_heatmap(dssp_data, args.img_dir)
             
             # Correlation analysis
             if args.molecule == "CLN025":
@@ -1550,7 +1585,6 @@ def main():
                 _, bond_num = foldedness_by_hbond(dummy_pdb)
                 committor_value = committor_model(cad_torch.to(CUDA_DEVICE))
                 committor_value = committor_value.cpu().detach().numpy().flatten()
-                
                 analyze_correlations(cv, committor_value, tica_data, bond_num, args.molecule, model_type)
             
             print(f"\nCompleted analysis for {model_type.upper()}. Plots saved to {os.path.join(args.img_dir, args.molecule)}")
