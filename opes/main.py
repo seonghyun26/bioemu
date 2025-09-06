@@ -133,10 +133,10 @@ class OPESSimulationRunner:
             "-plumed", str(plumed_file),
             "-nsteps", str(self.step),
             "-reseed", str(seed),
-            "-ntomp", str(self.cfg.opes.ntomp),
+            "-ntomp", "1",
             "-bonded", "gpu",
             "-nb", "gpu",
-            # "-pme", "gpu",
+            "-pme", "gpu",
             # "-pin", "on"
             # "-tunepme",
             # "-update", "gpu",
