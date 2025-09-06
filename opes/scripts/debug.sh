@@ -8,7 +8,7 @@ python main.py \
     --config-name $method \
     date=$date \
     +tags=['debug'] \
-    +opes.ntomp=2 \
+    ++opes.ntomp=2 \
     opes.max_seed=0 \
     start_gpu=0
 
