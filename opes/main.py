@@ -137,7 +137,7 @@ class OPESSimulationRunner:
             "-pme", "gpu",
             "-bonded", "gpu",
             "-nb", "gpu",
-            "-pin", "on"
+            # "-pin", "on"
             # "-tunepme",
             # "-update", "gpu",
             # "-dlb"
