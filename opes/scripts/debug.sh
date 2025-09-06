@@ -9,11 +9,11 @@ python main.py \
     date=$date \
     +tags=['debug'] \
     opes.max_seed=0 \
-    start_gpu=1
+    start_gpu=0
 
 wait 
 
-# python analysis_opes.py \
-#     --config-name $method \
-#     date=$date \
-#     opes.max_seed=0
+python analysis_opes.py \
+    --config-name $method \
+    date=$date \
+    opes.max_seed=0
