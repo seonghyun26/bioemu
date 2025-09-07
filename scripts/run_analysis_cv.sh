@@ -17,7 +17,7 @@ DATE=${4:-}
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-IMG_DIR="$PROJECT_ROOT/img/$MOLECULE"
+IMG_DIR="$PROJECT_ROOT/img"
 
 # Create img directory if it doesn't exist
 mkdir -p "$IMG_DIR"

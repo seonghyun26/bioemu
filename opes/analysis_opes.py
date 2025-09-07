@@ -145,7 +145,7 @@ def compute_cv_values(
         print(f"> Computing CV values")
         try:
             base_simulation_dir = Path(f"{os.getcwd()}/simulations") / cfg.molecule / cfg.method
-            seed_dir = base_simulation_dir / f"{cfg.date}/{max_seed}"
+            seed_dir = base_simulation_dir / f"{cfg.date}/0"
             jit_files = list(seed_dir.glob("*-jit.pt"))
             if not jit_files:
                 raise FileNotFoundError(f"No -jit.pt files found in {seed_dir}")

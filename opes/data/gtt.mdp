@@ -172,8 +172,8 @@ annealing-temp           =
 
 ; GENERATE VELOCITIES FOR STARTUP RUN
 gen-vel                  = no
-gen-temp                 = 300
-gen-seed                 = -539886854
+gen-temp                 = 360
+gen-seed                 = -1
 
 ; OPTIONS FOR BONDS    
 constraints              = none

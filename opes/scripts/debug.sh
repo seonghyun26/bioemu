@@ -13,7 +13,7 @@ python main.py \
 
 wait 
 
-python analysis_opes.py \
-    --config-name $method \
-    date=$date \
-    opes.max_seed=0
+# python analysis_opes.py \
+#     --config-name $method \
+#     date=$date \
+#     opes.max_seed=0

@@ -214,7 +214,7 @@ def load_reference_structure(
 
 def compute_cv_values(
     mlcv_model,
-    cad_torch,
+    cad_torch_path,
     model_type,
     molecule,
     reference_cad=None,
@@ -229,7 +229,7 @@ def compute_cv_values(
         cv = np.load(cv_data_path)
     
     else:
-        cad_torch = torch.load(cad_torch).to(device)
+        cad_torch = torch.load(cad_torch_path).to(device)
         dataset = TensorDataset(cad_torch)
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
         print(f"Computing CV values in batches of {batch_size}...")
@@ -1493,7 +1493,7 @@ def analyze_correlations(
 def main():
     parser = argparse.ArgumentParser(description='Run CV analysis for different model types')
     parser.add_argument('--model_type', choices=['mlcv', 'mlcv-trans', 'tda', 'tica', 'tae', 'vde', 'all'], default='all', help='Model type to analyze')
-    parser.add_argument('--molecule', choices=['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9'], default='CLN025', help='Molecule to analyze')
+    parser.add_argument('--molecule', choices=['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9', 'partial','all'], default='CLN025', help='Molecule to analyze')
     parser.add_argument('--date', type=str, default=None, help='Date string for MLCV model (only used for mlcv)')
     parser.add_argument('--img_dir', type=str, default='/home/shpark/prj-mlcv/lib/bioemu/img/debug', help='Directory to save images')
     parser.add_argument('--cuda_device', type=int, default=None, help='CUDA device ID to use (e.g., 0, 1). If not specified, auto-detect available device')
@@ -1507,91 +1507,101 @@ def main():
         print(f"Using specified CUDA device: cuda:{CUDA_DEVICE}")
     
     # Create image directory if it doesn't exist
-    os.makedirs(args.img_dir, exist_ok=True)
     # model_types = ['mlcv', 'mlcv-trans', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
+    os.makedirs(args.img_dir, exist_ok=True)
     model_types = ['mlcv', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
+    # molecules = ['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9'] if args.molecule == 'all' else [args.molecule]
+    molecules = ['CLN025', '2JOF', '2F4K'] if args.molecule == 'partial' else [args.molecule]
     
-    for model_type in model_types:
-        try:
-            print(f"\n{'='*60}")
-            print(f"Running analysis for {model_type.upper()} - {args.molecule}")
-            print(f"{'='*60}")
-            
-            # Load model and data
-            mlcv_model, tica_wrapper, committor_model, pos_torch, cad_torch, cad_switch_torch = load_model_and_data(
-                model_type, args.molecule, args.date
-            )
-            print(f"Loaded model: {model_type}")
-            
-            # Load reference structure
-            reference_pdb_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{args.molecule}/folded.pdb"
-            reference_cad = None
-            if args.molecule in ["CLN025","2JOF","2F4K","1FME","GTT","NTL9"] and os.path.exists(reference_pdb_path):
-                reference_cad = load_reference_structure(reference_pdb_path, tica_wrapper)
-                print(f"Loaded reference structure from {reference_pdb_path}")
-            else:
-                print(f"Reference structure not given, CV sign not aligned")
-            
-            # Compute CV values using batch processing
-            cv = compute_cv_values(
-                mlcv_model,
-                cad_torch,
-                model_type,
-                molecule=args.molecule,
-                reference_cad=reference_cad,
-                batch_size=10000,
-                device=CUDA_DEVICE
-            )
-            print(f"CV shape: {cv.shape}")
-            print(f"CV range: {cv.max():.4f} to {cv.min():.4f}")
-            plot_cv_histogram(cv, model_type, args.molecule, args.img_dir, args.date)
-            
-            # Compute TICA coordinates
-            tica_coord_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/dataset/{args.molecule.upper()}-all/tica_lag10_coord.npy"
-            if os.path.exists(tica_coord_path):
-                print(f"> Using cached TICA coordinates from {tica_coord_path}")
-                tica_data = np.load(tica_coord_path)
-            else:
-                if args.molecule == "CLN025":
-                    cad_switch_torch = cad_switch_torch.cpu() if cad_switch_torch.device.type == "cuda" else cad_switch_torch
-                    tica_data = tica_wrapper.transform(cad_switch_torch.numpy())
-                else:
-                    cad_torch = cad_torch.cpu() if cad_torch.device.type == "cuda" else cad_torch
-                    tica_data = tica_wrapper.transform(cad_torch.numpy())
-            print(f"TICA shape: {tica_data.shape}")
-            plot_tica_cv_analysis(cv, tica_data, model_type, args.molecule, args.img_dir, args.date)
-            if cv.shape[1] > 1:
-                plot_cv_tica_analysis(cv, tica_data, model_type, args.molecule, args.img_dir, args.date)
-            
-            # RMSD analysis
-            plot_rmsd_analysis(cv, args.molecule, model_type, args.img_dir, args.date)
-            
-            # DSSP analysis - load and filter data once
-            # print(f"\nLoading DSSP data for {args.molecule}...")
-            # dssp_data = load_and_filter_dssp_data(args.molecule)
-            # plot_dssp_full_violin_analysis(cv, dssp_data, model_type, args.img_dir, args.date)
-            # plot_dssp_simplified_violin_analysis(cv, dssp_data, model_type, args.img_dir, args.date)
-            # plot_per_residue_violin_analysis(cv, dssp_data, model_type, args.molecule, args.img_dir, args.date)
-            # plot_dssp_cv_heatmap(cv, dssp_data, model_type, args.img_dir, args.date)
-            # plot_dssp_composition_heatmap(dssp_data, args.img_dir)
-            
-            # Correlation analysis
-            if args.molecule == "CLN025":
-                plot_committor_analysis(cv, cad_torch, committor_model, model_type, args.molecule, args.img_dir, args.date)
-                plot_bond_analysis(cv, pos_torch, tica_wrapper, args.molecule, model_type, args.img_dir, args.date)
+    for molecule in molecules:
+        img_dir_mol = os.path.join(args.img_dir, molecule)
+        os.makedirs(img_dir_mol, exist_ok=True)
+        for model_type in model_types:
+            try:
+                print(f"\n{'='*60}")
+                print(f"Running analysis for {model_type.upper()} - {molecule}")
+                print(f"{'='*60}")
                 
-                dummy_pdb = tica_wrapper.pdb
-                dummy_pdb.xyz = pos_torch.cpu().detach().numpy()
-                _, bond_num = foldedness_by_hbond(dummy_pdb)
-                committor_value = committor_model(cad_torch.to(CUDA_DEVICE))
-                committor_value = committor_value.cpu().detach().numpy().flatten()
-                analyze_correlations(cv, committor_value, tica_data, bond_num, args.molecule, model_type)
+                # Load model and data
+                mlcv_model, tica_wrapper, committor_model, pos_path, cad_path, cad_switch_path = load_model_and_data(
+                    model_type, molecule, args.date
+                )
+                print(f"Loaded model: {model_type}")
+                
+                # Load reference structure
+                reference_pdb_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{molecule}/folded.pdb"
+                reference_cad = None
+                if molecule in ["CLN025","2JOF","2F4K","1FME","GTT","NTL9"] and os.path.exists(reference_pdb_path):
+                    reference_cad = load_reference_structure(reference_pdb_path, tica_wrapper)
+                    print(f"Loaded reference structure from {reference_pdb_path}")
+                else:
+                    print(f"Reference structure not given, CV sign not aligned")
+                
+                # Compute CV values using batch processing
+                cv = compute_cv_values(
+                    mlcv_model,
+                    cad_path,
+                    model_type,
+                    molecule=molecule,
+                    reference_cad=reference_cad,
+                    batch_size=10000,
+                    device=CUDA_DEVICE
+                )
+                print(f"CV shape: {cv.shape}")
+                print(f"CV range: {cv.max():.4f} to {cv.min():.4f}")
+                plot_cv_histogram(cv, model_type, molecule, img_dir_mol, args.date)
+                
+                # Compute TICA coordinates
+                tica_coord_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/dataset/{molecule.upper()}-all/tica_lag10_coord.npy"
+                if os.path.exists(tica_coord_path):
+                    print(f"> Using cached TICA coordinates from {tica_coord_path}")
+                    tica_data = np.load(tica_coord_path)
+                else:
+                    if molecule == "CLN025":
+                        cad_switch_torch = torch.load(cad_switch_path).to(CUDA_DEVICE)
+                        cad_switch_torch = cad_switch_torch.cpu() if cad_switch_torch.device.type == "cuda" else cad_switch_torch
+                        tica_data = tica_wrapper.transform(cad_switch_torch.numpy())
+                    else:
+                        cad_torch = torch.load(cad_path).to(CUDA_DEVICE)
+                        cad_torch = cad_torch.cpu() if cad_torch.device.type == "cuda" else cad_torch
+                        tica_data = tica_wrapper.transform(cad_torch.numpy())
+                print(f"TICA shape: {tica_data.shape}")
+                plot_tica_cv_analysis(cv, tica_data, model_type, molecule, img_dir_mol, args.date)
+                if cv.shape[1] > 1:
+                    plot_cv_tica_analysis(cv, tica_data, model_type, molecule, img_dir_mol, args.date)
+                
+                # RMSD analysis
+                plot_rmsd_analysis(cv, molecule, model_type, img_dir_mol, args.date)
+                
+                # DSSP analysis - load and filter data once
+                # print(f"\nLoading DSSP data for {molecule}...")
+                # dssp_data = load_and_filter_dssp_data(molecule)
+                # plot_dssp_full_violin_analysis(cv, dssp_data, model_type, img_dir_mol, args.date)
+                # plot_dssp_simplified_violin_analysis(cv, dssp_data, model_type, img_dir_mol, args.date)
+                # plot_per_residue_violin_analysis(cv, dssp_data, model_type, molecule, img_dir_mol, args.date)
+                # plot_dssp_cv_heatmap(cv, dssp_data, model_type, img_dir_mol, args.date)
+                # plot_dssp_composition_heatmap(dssp_data, img_dir_mol)
+                
+                # Correlation analysis
+                if molecule == "CLN025":
+                    pos_torch = torch.load(pos_path).to(CUDA_DEVICE)
+                    cad_torch = torch.load(cad_path).to(CUDA_DEVICE)
+                    cad_switch_torch = torch.load(cad_switch_path).to(CUDA_DEVICE)
+                    plot_committor_analysis(cv, cad_torch, committor_model, model_type, molecule, img_dir_mol, args.date)
+                    plot_bond_analysis(cv, pos_torch, tica_wrapper, molecule, model_type, img_dir_mol, args.date)
+                    
+                    dummy_pdb = tica_wrapper.pdb
+                    dummy_pdb.xyz = pos_torch.cpu().detach().numpy()
+                    _, bond_num = foldedness_by_hbond(dummy_pdb)
+                    committor_value = committor_model(cad_torch.to(CUDA_DEVICE))
+                    committor_value = committor_value.cpu().detach().numpy().flatten()
+                    analyze_correlations(cv, committor_value, tica_data, bond_num, molecule, model_type)
+                
+                print(f"\nCompleted analysis for {model_type.upper()} - {molecule}. Plots saved to {img_dir_mol}")
             
-            print(f"\nCompleted analysis for {model_type.upper()}. Plots saved to {os.path.join(args.img_dir, args.molecule)}")
-        
-        except Exception as e:
-            print(f"Error during analysis for {model_type.upper()}: {e}")
-            continue
+            except Exception as e:
+                print(f"Error during analysis for {model_type.upper()} - {molecule}: {e}")
+                continue
 
 if __name__ == "__main__":
     main()
