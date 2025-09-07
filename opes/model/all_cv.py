@@ -5,6 +5,7 @@ import wandb
 
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
+from matplotlib import pyplot as plt
 
 from omegaconf import OmegaConf
 from pathlib import Path
@@ -41,6 +42,24 @@ if __name__ == "__main__":
                 print(f"> CV range: [{cv.min():.6f}, {cv.max():.6f}]")
                 print(f"> CV mean: {cv.mean():.6f}, std: {cv.std():.6f}")
                 
+                plt.figure(figsize=(5, 4))
+                plt.hist(cv, bins=50, alpha=0.7, color='skyblue', edgecolor='black')
+                plt.xlabel("CV")
+                plt.grid(True, alpha=0.3)
+                plt.tight_layout()
+                save_path_normal = f"./temp/cv_histogram_{method}_{molecule}.png"
+                plt.savefig(save_path_normal, dpi=300, bbox_inches="tight")
+                plt.close()
+                
+                plt.figure(figsize=(5, 4))
+                plt.hist(cv, bins=50, alpha=0.7, color='skyblue', edgecolor='black', log=True)
+                plt.xlabel("CV")
+                plt.grid(True, alpha=0.3)
+                plt.tight_layout()
+                save_path_log = f"./temp/cv_histogram_{method}_{molecule}_log.png"
+                plt.savefig(save_path_log, dpi=300, bbox_inches="tight")
+                plt.close()
+                                
                 wandb.init(
                     project="cv-analysis",
                     name=f"{method}-{molecule}",
@@ -48,7 +67,8 @@ if __name__ == "__main__":
                 wandb.log({
                     "molecule": molecule,
                     "method": method,
-                    "cv/histogram": wandb.Histogram(cv),
+                    "cv/histogram": wandb.Image(save_path_normal),
+                    "cv/histogram(log)": wandb.Image(save_path_log),
                     "cv/mean": cv.mean(),
                     "cv/std": cv.std(),
                 })

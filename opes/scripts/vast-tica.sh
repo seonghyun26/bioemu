@@ -11,7 +11,7 @@ python main.py \
     +tags=['vast']
 
 python analysis_opes.py \
-    --config-name $method \
+    --config-name $method-$molecule \
     date=$date \
     +tags=['vast']
 
