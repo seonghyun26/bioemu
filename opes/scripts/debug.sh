@@ -1,19 +1,23 @@
 cd ../
 
-method="debug"
+method="tda"
+molecule=${1:-"2jof"}
 date="debug"
 echo $date
 
 python main.py \
-    --config-name $method \
+    --config-name $method-$molecule \
     date=$date \
     +tags=['debug'] \
     opes.max_seed=0 \
+    opes.step=10000 \
     start_gpu=0
 
 wait 
 
-# python analysis_opes.py \
-#     --config-name $method \
-#     date=$date \
-#     opes.max_seed=0
+python analysis_opes.py \
+    --config-name $method-$molecule \
+    date=$date \
+    opes.max_seed=0 \
+    analysis.skip_steps=0 \
+    analysis.unit_steps=1

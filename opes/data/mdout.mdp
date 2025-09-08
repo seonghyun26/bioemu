@@ -2,7 +2,7 @@
 ;	File 'mdout.mdp' was generated
 ;	By user: unknown (0)
 ;	On host: 69957097b7c9
-;	At date: Fri Sep  5 14:49:05 2025
+;	At date: Mon Sep  8 13:59:58 2025
 ;
 ;	Created by:
 ;	              :-) GROMACS - gmx grompp, 2024.3-plumed_2.10b (-:
@@ -11,7 +11,7 @@
 ;	Data prefix:  /gromacs/AVX2_256_ts
 ;	Working dir:  /bioemu/opes/data
 ;	Command line:
-;	  gmx grompp -f gtt.mdp -c GTT/folded.gro -p GTT/topol.top -o GTT/gtt.tpr -maxwarn 2
+;	  gmx grompp -f 2jof.mdp -c 2JOF/folded.gro -p 2JOF/topol.top -o 2JOF/nvt_0.tpr -maxwarn 2
 
 ; VARIOUS PREPROCESSING OPTIONS
 ; Preprocessor information: use cpp syntax.
@@ -135,7 +135,7 @@ implicit-solvent         = no
 
 ; OPTIONS FOR WEAK COUPLING ALGORITHMS
 ensemble-temperature-setting = constant
-ensemble-temperature     = 360
+ensemble-temperature     = 290
 ; Temperature coupling  
 tcoupl                   = V-rescale
 nsttcouple               = 10
@@ -145,7 +145,7 @@ print-nose-hoover-chain-variables = No
 tc-grps                  = Protein
 ; Time constant (ps) and reference temperature (K)
 tau_t                    = 0.1
-ref_t                    = 360
+ref_t                    = 290
 ; pressure coupling     
 pcoupl                   = No
 pcoupltype               = Isotropic

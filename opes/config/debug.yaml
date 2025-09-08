@@ -1,5 +1,5 @@
-molecule: 1fme
 method: tda
+molecule: 1fme
 ckpt_dir: _baseline_
 ckpt_path: tda-1FME
 date: debug

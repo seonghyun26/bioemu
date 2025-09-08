@@ -179,18 +179,18 @@ def load_model_and_data(
     # Setup TICA wrapper
     lag = 10
     if TICA_SWITCH:
-        tica_model_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{molecule}/{molecule}_tica_model_switch_lag{lag}.pkl"
+        tica_model_path = f"./opes/data/{molecule}/{molecule}_tica_model_switch_lag{lag}.pkl"
     else:
-        tica_model_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{molecule}/{molecule}_tica_model_lag{lag}.pkl"         
+        tica_model_path = f"./opes/data/{molecule}/{molecule}_tica_model_lag{lag}.pkl"         
     tica_wrapper = TICA_WRAPPER(
         tica_model_path=tica_model_path,
-        pdb_path=f"/home/shpark/prj-mlcv/lib/DESRES/data/{molecule}/{molecule}_from_mae.pdb",
+        pdb_path=f"./opes/data/{molecule}/{molecule}_from_mae.pdb",
         tica_switch=TICA_SWITCH
     )
     
     # Load committor model
     if molecule == "CLN025":
-        committor_path = "/home/shpark/prj-mlcv/lib/DESRES/data/CLN025/committor.pt"
+        committor_path = "./opes/data/CLN025/committor.pt"
         committor_model = torch.jit.load(committor_path, map_location=f"cuda:{CUDA_DEVICE}")
     else:
         committor_model = None
@@ -223,7 +223,7 @@ def compute_cv_values(
     cache=True,
 ):
     """Compute CV values from the model with optional sign flipping using batch processing."""
-    cv_data_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/dataset/{molecule.upper()}-all/{model_type}_mlcv.npy"
+    cv_data_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/data/{molecule.upper()}/{model_type}_mlcv.npy"
     if os.path.exists(cv_data_path):
         print(f"> Using cached CV values from {cv_data_path}")
         cv = np.load(cv_data_path)
@@ -1529,7 +1529,7 @@ def main():
                 print(f"Loaded model: {model_type}")
                 
                 # Load reference structure
-                reference_pdb_path = f"/home/shpark/prj-mlcv/lib/DESRES/data/{molecule}/folded.pdb"
+                reference_pdb_path = f"./opes/data/{molecule}/folded.pdb"
                 reference_cad = None
                 if molecule in ["CLN025","2JOF","2F4K","1FME","GTT","NTL9"] and os.path.exists(reference_pdb_path):
                     reference_cad = load_reference_structure(reference_pdb_path, tica_wrapper)
@@ -1547,14 +1547,12 @@ def main():
                     batch_size=10000,
                     device=CUDA_DEVICE
                 )
-                if model_type == "tica":
-                    cv = -cv
                 print(f"CV shape: {cv.shape}")
                 print(f"CV range: {cv.max():.4f} to {cv.min():.4f}")
                 plot_cv_histogram(cv, model_type, molecule, img_dir_mol, args.date)
                 
                 # Compute TICA coordinates
-                tica_coord_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/dataset/{molecule.upper()}-all/tica_lag10_coord.npy"
+                tica_coord_path = f"./opes/data/{molecule.upper()}/tica_lag10_coord.npy"
                 if os.path.exists(tica_coord_path):
                     print(f"> Using cached TICA coordinates from {tica_coord_path}")
                     tica_data = np.load(tica_coord_path)

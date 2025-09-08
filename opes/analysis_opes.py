@@ -56,6 +56,7 @@ def gmx_process_trajectory(
                 "gmx", "trjconv",
                 "-f", f"{log_dir}/{seed}.xtc",
                 "-pbc", "nojump",
+                "-center",
                 "-o", trj_save_path,
             ]
             
@@ -144,7 +145,7 @@ def compute_cv_values(
     Returns:
         tuple: cv_values
     """
-    cv_path = f"./dataset/{cfg.molecule.upper()}-all/{cfg.method}_mlcv.npy"
+    cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv.npy"
     if os.path.exists(cv_path):
         print(f"> Using cached CV values from {cv_path}")
         cv = np.load(cv_path)
@@ -162,7 +163,7 @@ def compute_cv_values(
             mlcv_model = torch.jit.load(mlcv_model_path)
             mlcv_model.eval()
             mlcv_model.to("cuda:0")
-            cad_full_path = f"./dataset/{cfg.molecule.upper()}-all/cad.pt"
+            cad_full_path = f"./data/{cfg.molecule.upper()}/cad.pt"
             cad_full = torch.load(cad_full_path)
             cad_full = cad_full.to("cuda:0")
             print(f"> Using model file: {mlcv_model_path}")
@@ -571,11 +572,11 @@ def plot_tica_scatter(
             tica_model = pickle.load(f)
         
         # Load coordinates for background
-        tica_coord_path = f"./dataset/{cfg.molecule.upper()}-all/tica_lag10_coord.npy"
+        tica_coord_path = f"./data/{cfg.molecule.upper()}/tica_lag10_coord.npy"
         if Path(tica_coord_path).exists():
             tica_coord_full = np.load(tica_coord_path)
         else:
-            cad_full_path = f"./dataset/{cfg.molecule.upper()}-all/cad-switch.pt" if cfg.molecule == "cln025" else f"./dataset/{cfg.molecule.upper()}-all/cad.pt"
+            cad_full_path = f"./data/{cfg.molecule.upper()}/cad-switch.pt" if cfg.molecule == "cln025" else f"./data/{cfg.molecule.upper()}/cad.pt"
             cad_full = torch.load(cad_full_path).numpy()
             tica_coord_full = tica_model.transform(cad_full)
     
@@ -721,8 +722,8 @@ def main(cfg):
     
     try:
         # logger.info("Post processing trajectory...")
-        # gmx_process_trajectory(log_dir, analysis_dir, max_seed)
-        # gmx_process_energy(log_dir, analysis_dir, max_seed)
+        gmx_process_trajectory(log_dir, analysis_dir, max_seed)
+        gmx_process_energy(log_dir, analysis_dir, max_seed)
         
         # Run analysis functions
         logger.info("Running CV over time analysis...")

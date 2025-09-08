@@ -43,7 +43,7 @@ if __name__ == "__main__":
                 mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/{model_ckpt_mapping[molecule]}-{molecule}-jit.pt", map_location=device)
                 mlcv_model.eval()
             
-            dataset_dir = Path(f"/home/shpark/prj-mlcv/lib/bioemu/opes/dataset/{molecule.upper()}-all")
+            dataset_dir = Path(f"/home/shpark/prj-mlcv/lib/bioemu/opes/{molecule.upper()}")
             dataset_dir.mkdir(parents=True, exist_ok=True)
             mlcv_save_path = dataset_dir / f"{method}_mlcv.npy"
             
