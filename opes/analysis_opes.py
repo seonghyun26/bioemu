@@ -269,7 +269,10 @@ def plot_pmf(
         equil_temp=equil_temp
     )
     reference_pmf -= reference_pmf.min()
-    pmf_mae = np.mean(np.abs(mean_pmf - reference_pmf))
+    reference_mask = ~np.isnan(reference_pmf)
+    mean_pmf_mask = ~np.isnan(mean_pmf)
+    pmf_mask = reference_mask & mean_pmf_mask
+    pmf_mae = np.mean(np.abs(mean_pmf[pmf_mask] - reference_pmf[pmf_mask]))
 
     print(f"> Plotting PMF")
     fig = plt.figure(figsize=(6, 4))
@@ -305,7 +308,8 @@ def plot_pmf(
     logger.info(f"PMF plot saved to {analysis_dir}/pmf.png")
     wandb.log({
         "pmf": wandb.Image(str(analysis_dir / "pmf.png")),
-        "pmf_mae": pmf_mae
+        "pmf_mae": pmf_mae,
+        "pmf_std": std_pmf.mean()
     })
     plt.close()
     
