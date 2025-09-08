@@ -434,7 +434,8 @@ def plot_free_energy_curve(
         "free_energy_curve": wandb.Image(str(plot_path)),
         "free_energy_difference": mean_delta_fs[-1],
         "free_energy_difference_std": std_delta_fs[-1],
-        "free_energy_difference_reference": reference_Delta_F
+        "free_energy_difference_reference": reference_Delta_F,
+        "free_energy_difference_mae": np.abs(mean_delta_fs[-1] - reference_Delta_F)
     })
     plt.close()
     
