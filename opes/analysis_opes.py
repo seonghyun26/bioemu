@@ -573,7 +573,7 @@ def plot_tica_scatter(
             tica_model = pickle.load(f)
         
         # Load coordinates for background
-        tica_coord_path = f"./data/{cfg.molecule.upper()}/tica_lag10_coord.npy"
+        tica_coord_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_coord_lag10.npy"
         if Path(tica_coord_path).exists():
             tica_coord_full = np.load(tica_coord_path)
         else:
