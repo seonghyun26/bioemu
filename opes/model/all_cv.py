@@ -19,9 +19,8 @@ if __name__ == "__main__":
     # args = parser.parse_args()
     
     # molecule_list = ["CLN025","2JOF","2F4K","1FME","GTT","NTL9"]
-    # method_list = ["tda","tica","tae","vde"]
-    molecule_list = ["2JOF"]
-    method_list = ["ours"]
+    method_list = ["tda","tica","tae","vde", "ours"]
+    molecule_list = ["1FME"]
     
     device = "cuda:0"
     
