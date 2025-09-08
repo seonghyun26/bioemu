@@ -682,7 +682,7 @@ def plot_cv_over_time(
                 
             except Exception as e:
                 logger.error(f"Error in CV over time analysis: {e}")
-            raise
+                raise
 
 
 @hydra.main(
