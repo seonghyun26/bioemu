@@ -269,6 +269,7 @@ def plot_pmf(
         equil_temp=equil_temp
     )
     reference_pmf -= reference_pmf.min()
+    pmf_mae = np.mean(np.abs(mean_pmf - reference_pmf))
 
     print(f"> Plotting PMF")
     fig = plt.figure(figsize=(6, 4))
@@ -303,7 +304,8 @@ def plot_pmf(
     plt.savefig(analysis_dir / "pmf.png", dpi=300, bbox_inches="tight")
     logger.info(f"PMF plot saved to {analysis_dir}/pmf.png")
     wandb.log({
-        "pmf": wandb.Image(str(analysis_dir / "pmf.png"))
+        "pmf": wandb.Image(str(analysis_dir / "pmf.png")),
+        "pmf_mae": pmf_mae
     })
     plt.close()
     
@@ -483,58 +485,61 @@ def plot_rmsd_analysis(
             desc="Computing RMSD"
         )
         for seed in pbar:
-            traj_file = log_dir / "analysis" / f"{seed}_tc.xtc"
-
-            # Load trajectory and compute RMSD
-            try:
-                traj = md.load_xtc(
-                    traj_file,
-                    top=ref_pdb_path,
-                )
-                traj.center_coordinates()
-                rmsd_values = md.rmsd(
-                    traj,
-                    ref_traj,
-                    atom_indices = traj.topology.select("name CA")                        
-                )
-                
-            except Exception as e:
-                logger.warning(f"Error processing trajectory for seed {seed}: {e}")
+            plot_path = analysis_dir / f"rmsd_analysis_{seed}.png"
+            if os.path.exists(plot_path):
+                print(f"✓ RMSD analysis plot already exists: {plot_path}")
                 continue
         
-            # Load COLVAR data
-            colvar_file = log_dir / f"{seed}" / "COLVAR"
-            if not colvar_file.exists():
-                logger.warning(f"COLVAR file not found: {colvar_file}")
-                continue
-            traj_dat = np.genfromtxt(colvar_file, skip_header=1)
-            time = traj_dat[:, 0]
-            final_time = time[-1] / 1000
-            time_grid = np.linspace(0, final_time, num=len(rmsd_values))
+            else:
+                # Load trajectory and compute RMSD
+                traj_file = log_dir / "analysis" / f"{seed}_tc.xtc"
+                try:
+                    traj = md.load_xtc(
+                        traj_file,
+                        top=ref_pdb_path,
+                    )
+                    traj.center_coordinates()
+                    rmsd_values = md.rmsd(
+                        traj,
+                        ref_traj,
+                        atom_indices = traj.topology.select("name CA")                        
+                    )
+                except Exception as e:
+                    logger.warning(f"Error processing trajectory for seed {seed}: {e}")
+                    continue
             
-            # Plot RMSD over time
-            fig = plt.figure(figsize=(5, 3))
-            ax = fig.add_subplot(111)
-            plt.plot(time_grid, rmsd_values, color=blue, linewidth=4, label='RMSD')
-            plt.xlabel('Time (ns)')
-            plt.ylabel('RMSD (nm)')
-            ax.set_title(f'CA RMSD to Reference - {cfg.method}, {seed}')
-            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
-            # ax.set_yticks([-1, -0.5, 0, 0.5, 1])
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-            
-            # Save plot
-            plot_path = analysis_dir / f"rmsd_analysis_{seed}.png"
-            plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-            logger.info(f"RMSD analysis saved to {plot_path}")
-            wandb.log({
-                "rmsd_analysis": wandb.Image(str(plot_path)),
-                "max_rmsd": float(np.max(rmsd_values)),
-                "min_rmsd": float(np.min(rmsd_values))
-            })
-            
-            plt.close()
+                # Load COLVAR data
+                colvar_file = log_dir / f"{seed}" / "COLVAR"
+                if not colvar_file.exists():
+                    logger.warning(f"COLVAR file not found: {colvar_file}")
+                    continue
+                traj_dat = np.genfromtxt(colvar_file, skip_header=1)
+                time = traj_dat[:, 0]
+                final_time = time[-1] / 1000
+                time_grid = np.linspace(0, final_time, num=len(rmsd_values))
+                
+                # Plot RMSD over time
+                fig = plt.figure(figsize=(5, 3))
+                ax = fig.add_subplot(111)
+                plt.plot(time_grid, rmsd_values, color=blue, linewidth=4, label='RMSD')
+                plt.xlabel('Time (ns)')
+                plt.ylabel('RMSD (nm)')
+                ax.set_title(f'CA RMSD to Reference - {cfg.method}, {seed}')
+                ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
+                # ax.set_yticks([-1, -0.5, 0, 0.5, 1])
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+                
+                # Save plot
+                plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+                logger.info(f"RMSD analysis saved to {plot_path}")
+                wandb.log({
+                    "rmsd_analysis": wandb.Image(str(plot_path)),
+                    "max_rmsd": float(np.max(rmsd_values)),
+                    "min_rmsd": float(np.min(rmsd_values))
+                })
+                
+                plt.close()
         
     except Exception as e:
         logger.error(f"Error in RMSD analysis: {e}")
@@ -616,8 +621,6 @@ def plot_tica_scatter(
                 ax.set_ylabel("TIC 2")
                 ax.set_title(f'TICA Scatter Plot - {cfg.method}')
                 ax.grid(True, alpha=0.3)
-                
-                # Save plot
                 plt.savefig(plot_path, dpi=300, bbox_inches="tight")
                 logger.info(f"TICA scatter plot saved to {plot_path}")
                 wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
