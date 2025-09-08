@@ -124,8 +124,8 @@ def gmx_process_energy(
                 if process.stderr:
                     print(f"GROMACSOUT:, seed {seed}:", process.stderr)
                 
-        except subprocess.CalledProcessError as e:
-            print(f"gmx energy failed, seed {seed} : {e}")
+            except subprocess.CalledProcessError as e:
+                print(f"gmx energy failed, seed {seed} : {e}")
 
 
 
