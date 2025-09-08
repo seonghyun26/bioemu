@@ -1511,7 +1511,7 @@ def main():
     os.makedirs(args.img_dir, exist_ok=True)
     model_types = ['mlcv', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
     # molecules = ['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9'] if args.molecule == 'all' else [args.molecule]
-    molecules = ['CLN025', '2JOF', '2F4K'] if args.molecule == 'partial' else [args.molecule]
+    molecules = ['1FME', '2F4K', 'GTT', 'NTL9'] if args.molecule == 'partial' else [args.molecule]
     
     for molecule in molecules:
         img_dir_mol = os.path.join(args.img_dir, molecule)
@@ -1547,6 +1547,8 @@ def main():
                     batch_size=10000,
                     device=CUDA_DEVICE
                 )
+                if model_type == "tica":
+                    cv = -cv
                 print(f"CV shape: {cv.shape}")
                 print(f"CV range: {cv.max():.4f} to {cv.min():.4f}")
                 plot_cv_histogram(cv, model_type, molecule, img_dir_mol, args.date)

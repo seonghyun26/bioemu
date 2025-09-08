@@ -18,8 +18,10 @@ if __name__ == "__main__":
     # parser.add_argument("--molecule", type=str, default="2JOF")
     # args = parser.parse_args()
     
-    molecule_list = ["CLN025","2JOF","2F4K","1FME","GTT","NTL9"]
-    method_list = ["tda","tica","tae","vde"]
+    # molecule_list = ["CLN025","2JOF","2F4K","1FME","GTT","NTL9"]
+    # method_list = ["tda","tica","tae","vde"]
+    molecule_list = ["2JOF"]
+    method_list = ["ours"]
     
     device = "cuda:0"
     
@@ -27,9 +29,19 @@ if __name__ == "__main__":
         for method in method_list:
             print(f"\nMethod: {method}, Molecule: {molecule}")
             batch_size_eval = 10000
-            mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/_baseline_/{method}-{molecule}-jit.pt", map_location=device)
-            mlcv_model.eval()
-            # mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/mlcv_model-jit.pt", map_location=device)
+            if method != "ours":
+                mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/_baseline_/{method}-{molecule}-jit.pt", map_location=device)
+                mlcv_model.eval()
+            else:
+                model_ckpt_mapping = {
+                    "2JOF": "0814_073849",
+                    # "2F4K": "0819_173704",
+                    "1FME": "0904_160804",
+                    "NTL9": "0905_054344",
+                    "GTT": "0905_160702",
+                }
+                mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/{model_ckpt_mapping[molecule]}-{molecule}-jit.pt", map_location=device)
+                mlcv_model.eval()
             
             dataset_dir = Path(f"/home/shpark/prj-mlcv/lib/bioemu/opes/dataset/{molecule.upper()}-all")
             dataset_dir.mkdir(parents=True, exist_ok=True)

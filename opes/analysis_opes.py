@@ -309,7 +309,7 @@ def plot_pmf(
     wandb.log({
         "pmf": wandb.Image(str(analysis_dir / "pmf.png")),
         "pmf_mae": pmf_mae,
-        "pmf_std": std_pmf.mean()
+        "pmf_std": std_pmf[~np.isnan(std_pmf)].mean()
     })
     plt.close()
     
@@ -395,10 +395,11 @@ def plot_free_energy_curve(
     all_delta_fs = padded
     
     # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
-    has_data = np.any(~np.isnan(all_delta_fs), axis=0)
-    mean_delta_fs = np.nanmean(all_delta_fs[:, has_data], axis=0)
-    std_delta_fs  = np.nanstd(all_delta_fs[:, has_data],  axis=0)
-    time_axis     = time_axis[has_data]
+    has_data = (~np.isnan(all_delta_fs)) & (~np.isinf(all_delta_fs))
+    valid_values = padded * has_data.astype(float)
+    mean_delta_fs = np.nanmean(valid_values, axis=0)
+    std_delta_fs  = np.nanstd(valid_values,  axis=0)
+    time_axis     = time_axis[np.any(has_data, axis=0)]
     
     # Compute reference Delta F
     print(f"> Computing reference Delta F")
@@ -720,8 +721,8 @@ def main(cfg):
     
     try:
         # logger.info("Post processing trajectory...")
-        gmx_process_trajectory(log_dir, analysis_dir, max_seed)
-        gmx_process_energy(log_dir, analysis_dir, max_seed)
+        # gmx_process_trajectory(log_dir, analysis_dir, max_seed)
+        # gmx_process_energy(log_dir, analysis_dir, max_seed)
         
         # Run analysis functions
         logger.info("Running CV over time analysis...")
