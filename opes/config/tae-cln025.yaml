@@ -6,7 +6,7 @@ date: debug
 tags: ['opes']
 start_gpu: 0
 opes:
-  step: 400_000_000
+  step: 500_000_000
   sigma: 0.05
   max_seed: 3
 analysis:

@@ -12,4 +12,4 @@ opes:
 analysis:
   skip_steps: 50000
   unit_steps: 25000
-  equil_temp: 325
+  equil_temp: 340

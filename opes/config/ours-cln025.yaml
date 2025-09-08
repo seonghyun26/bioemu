@@ -1,12 +1,12 @@
 molecule: cln025
 method: ours
 ckpt_dir: '.'
-ckpt_path: 0816_171833-CLN025-f32
+ckpt_path: 0816_171833-CLN025
 date: debug
 tags: ['opes']
 start_gpu: 0
 opes:
-  step: 400_000_000
+  step: 500_000_000
   sigma: 0.05
   max_seed: 3
 analysis:

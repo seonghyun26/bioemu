@@ -235,6 +235,8 @@ def plot_pmf(
         cv_maxs.append(cv.max())
     cv_grid_min = np.min(cv_mins) if len(cv_mins) > 0 else 0.0
     cv_grid_max = np.max(cv_maxs) if len(cv_maxs) > 0 else 0.0
+    cv_grid_min = min(cv_grid_min, -1.0)
+    cv_grid_max = max(cv_grid_max, 1.0)
     cv_grid = np.arange(cv_grid_min - sigma / 2, cv_grid_max + sigma / 2, sigma)
     
     # Compute PMF
@@ -400,7 +402,6 @@ def plot_free_energy_curve(
     valid_values = padded * has_data.astype(float)
     mean_delta_fs = np.nanmean(valid_values, axis=0)
     std_delta_fs  = np.nanstd(valid_values,  axis=0)
-    time_axis     = time_axis[np.any(has_data, axis=0)]
     
     # Compute reference Delta F
     print(f"> Computing reference Delta F")
@@ -722,8 +723,8 @@ def main(cfg):
     
     try:
         # logger.info("Post processing trajectory...")
-        gmx_process_trajectory(log_dir, analysis_dir, max_seed)
-        gmx_process_energy(log_dir, analysis_dir, max_seed)
+        # gmx_process_trajectory(log_dir, analysis_dir, max_seed)
+        # gmx_process_energy(log_dir, analysis_dir, max_seed)
         
         # Run analysis functions
         logger.info("Running CV over time analysis...")
