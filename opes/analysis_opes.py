@@ -46,34 +46,38 @@ def gmx_process_trajectory(
         desc="Post processing trajectory"
     )
     for seed in pbar:
-        # GROMACS command for post procesing trajectory with trjconv
-        cmd = [
-            "gmx", "trjconv",
-            "-f", f"{log_dir}/{seed}.xtc",
-            "-pbc", "nojump",
-            "-o", f"{analysis_dir}/{seed}_tc.xtc",
-        ]
+        trj_save_path = f"{analysis_dir}/{seed}_tc.xtc"
+        if os.path.exists(trj_save_path):
+            print(f"✓ trjconv file already exists: {trj_save_path}")
+            continue
         
-        # Run and wait for completion
-        print(f"Running command: {' '.join(cmd)}")
-        try:
-            process = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True
-            )
-            if process.returncode == 0:
-                print(f"✓ gmx trjconv completed successfully, seed {seed}")
-                print(f"Created trjconv file: {analysis_dir}/{seed}_tc.xtc")
-            else:
-                print(f"✗ gmx trjconv failed with return code {process.returncode}, seed {seed}")
-            if process.stdout:
-                print(f"STDOUT:, seed {seed}:", process.stdout)
-            if process.stderr:
-                print(f"GROMACSOUT:, seed {seed}:", process.stderr)
-                
-        except subprocess.CalledProcessError as e:
-            print(f"gmx trjconv failed, seed {seed}: {e}")
+        else:
+            cmd = [
+                "gmx", "trjconv",
+                "-f", f"{log_dir}/{seed}.xtc",
+                "-pbc", "nojump",
+                "-o", trj_save_path,
+            ]
+            
+            print(f"Running command: {' '.join(cmd)}")
+            try:
+                process = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True
+                )
+                if process.returncode == 0:
+                    print(f"✓ gmx trjconv completed successfully, seed {seed}")
+                    print(f"Created trjconv file: {trj_save_path}")
+                else:
+                    print(f"✗ gmx trjconv failed with return code {process.returncode}, seed {seed}")
+                if process.stdout:
+                    print(f"STDOUT:, seed {seed}:", process.stdout)
+                if process.stderr:
+                    print(f"GROMACSOUT:, seed {seed}:", process.stderr)
+                    
+            except subprocess.CalledProcessError as e:
+                print(f"gmx trjconv failed, seed {seed}: {e}")
     
     
 def gmx_process_energy(
@@ -89,30 +93,36 @@ def gmx_process_energy(
         desc="Computing energy"
     )
     for seed in pbar:
-        cmd = [
-            "gmx", "energy",
-            "-f", f"{log_dir}/{seed}.edr", 
-            "-o", f"{analysis_dir}/{seed}.xvg",
-            '-xvg', 'none'
-        ]
+        edr_save_path = f"{analysis_dir}/{seed}.xvg"
+        if os.path.exists(edr_save_path):
+            print(f"✓ energy file already exists: {edr_save_path}")
+            continue
+        
+        else:
+            cmd = [
+                "gmx", "energy",
+                "-f", f"{log_dir}/{seed}.edr", 
+                "-o", f"{analysis_dir}/{seed}.xvg",
+                '-xvg', 'none'
+            ]
 
-        print(f"Running command: {' '.join(cmd)}")
-        try:
-            process = subprocess.run(
-                cmd,
-                input="16 17 9 0\\n",
-                capture_output=True,
-                text=True
-            )
-            if process.returncode == 0:
-                print(f"✓ gmx energy completed successfully, seed {seed}")
-                print(f"Created energy file: {analysis_dir}/{seed}.xvg")
-            else:
-                print(f"✗ gmx energy failed with return code {process.returncode}, seed {seed}")
-            if process.stdout:
-                print(f"STDOUT:, seed {seed}:", process.stdout)
-            if process.stderr:
-                print(f"GROMACSOUT:, seed {seed}:", process.stderr)
+            print(f"Running command: {' '.join(cmd)}")
+            try:
+                process = subprocess.run(
+                    cmd,
+                    input="16 17 9 0\\n",
+                    capture_output=True,
+                    text=True
+                )
+                if process.returncode == 0:
+                    print(f"✓ gmx energy completed successfully, seed {seed}")
+                    print(f"Created energy file: {analysis_dir}/{seed}.xvg")
+                else:
+                    print(f"✗ gmx energy failed with return code {process.returncode}, seed {seed}")
+                if process.stdout:
+                    print(f"STDOUT:, seed {seed}:", process.stdout)
+                if process.stderr:
+                    print(f"GROMACSOUT:, seed {seed}:", process.stderr)
                 
         except subprocess.CalledProcessError as e:
             print(f"gmx energy failed, seed {seed} : {e}")
@@ -134,7 +144,6 @@ def compute_cv_values(
     Returns:
         tuple: cv_values
     """
-    # cv_path = f"data/{cfg.molecule.upper()}/{cfg.method}_mlcv.pt"
     cv_path = f"./dataset/{cfg.molecule.upper()}-all/{cfg.method}_mlcv.npy"
     if os.path.exists(cv_path):
         print(f"> Using cached CV values from {cv_path}")
@@ -247,14 +256,12 @@ def plot_pmf(
         )
         pmf -= pmf.min()
         all_pmfs.append(pmf)
-    # Compute mean and std PMF
     all_pmfs = np.array(all_pmfs)
     mean_pmf = np.mean(all_pmfs, axis=0)
     std_pmf = np.std(all_pmfs, axis=0)
     
     # Compute reference PMF
     print(f"> Computing reference PMF")
-    # reference_cv_grid = np.arange(reference_cvs.min(), reference_cvs.max() + cfg.sigma / 2, cfg.sigma)
     reference_pmf, _ = mbar.pmf_from_weights(
         cv_grid,
         reference_cvs,
@@ -379,11 +386,12 @@ def plot_free_energy_curve(
         padded[i, :len(x)] = x
     idx_longest = int(np.argmax([len(t) for t in all_times]))
     time_axis = all_times[idx_longest]
+    all_delta_fs = padded
     
     # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
-    has_data = np.any(~np.isnan(padded), axis=0)
-    mean_delta_fs = np.nanmean(padded[:, has_data], axis=0)
-    std_delta_fs  = np.nanstd(padded[:, has_data],  axis=0)
+    has_data = np.any(~np.isnan(all_delta_fs), axis=0)
+    mean_delta_fs = np.nanmean(all_delta_fs[:, has_data], axis=0)
+    std_delta_fs  = np.nanstd(all_delta_fs[:, has_data],  axis=0)
     time_axis     = time_axis[has_data]
     
     # Compute reference Delta F
@@ -422,11 +430,13 @@ def plot_free_energy_curve(
             alpha=0.2, color=blue, linewidth=1
         )
     for idx, delta_f in enumerate(all_delta_fs):
-        ax.plot(
-            time_axis, delta_f,
-            color=blue, linewidth=2, alpha=0.2,
-            label=f"OPES {idx}"
-        )
+        mask = ~np.isnan(delta_f)
+        if np.any(mask):
+            ax.plot(
+                time_axis[mask], delta_f[mask],
+                color=blue, linewidth=2, alpha=0.2,
+                label=f"OPES {idx}"
+            )
     ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
     ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
     ax.set_xlim(0.0, time_axis[-1])
@@ -544,76 +554,78 @@ def plot_tica_scatter(
         # Load TICA model
         if cfg.molecule == "cln025":
             tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_switch_lag10.pkl"
-            cad_full_path = f"./dataset/{cfg.molecule.upper()}-all/cad-switch.pt"
         else:
             tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_lag10.pkl"
-            cad_full_path = f"./dataset/{cfg.molecule.upper()}-all/cad.pt"
             
         with open(tica_model_path, 'rb') as f:
             tica_model = pickle.load(f)
         
-        # Load full dataset for background
-        if Path(cad_full_path).exists():
-            cad_full = torch.load(cad_full_path)
-            tica_coord_full = tica_model.transform(cad_full.numpy())
+        # Load coordinates for background
+        tica_coord_path = f"./dataset/{cfg.molecule.upper()}-all/tica_lag10_coord.npy"
+        if Path(tica_coord_path).exists():
+            tica_coord_full = np.load(tica_coord_path)
         else:
-            logger.warning(f"Full CAD dataset not found: {cad_full_path}")
-            tica_coord_full = None
-        
+            logger.warning(f"Full CAD dataset not found: {tica_coord_path}")
+    
         # Process simulation trajectory
         pbar = tqdm(
             range(max_seed + 1),
             desc="Computing TICA scatter"
         )
         for seed in pbar:
-            # Load trajectory data
-            traj_file = log_dir / f"{seed}.xtc"
-            if not traj_file.exists()   :
-                logger.warning(f"No trajectory file found for seed {seed}")
+            # Check if plot already exists
+            plot_path = analysis_dir / f"tica_scatter_{seed}.png"
+            if os.path.exists(plot_path):
+                print(f"✓ TICA scatter plot already exists: {plot_path}")
                 continue
+            
+            else:
+                # Load trajectory data
+                traj_file = log_dir / f"{seed}.xtc"
+                if not traj_file.exists()   :
+                    logger.warning(f"No trajectory file found for seed {seed}")
+                    continue
 
-            top_file = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_from_mae.pdb"
-            if not Path(top_file).exists():
-                logger.warning(f"Topology file not found: {top_file}")
-                continue
-            try:
-                traj = md.load(str(traj_file), top=top_file)
-                ca_resid_pair = np.array([(a.index, b.index) for a, b in combinations(list(traj.topology.residues), 2)])
-                ca_pair_contacts, _ = md.compute_contacts(traj, scheme="ca", contacts=ca_resid_pair, periodic=False)
-                ca_pair_contacts_switch = (1 - np.power(ca_pair_contacts / 0.8, 6)) / (1 - np.power(ca_pair_contacts / 0.8, 12))
-                tica_coord = tica_model.transform(ca_pair_contacts_switch)
-            except Exception as e:
-                logger.warning(f"Error processing trajectory for seed {seed}: {e}")
-                continue
-        
-            # Create plot
-            fig = plt.figure(figsize=(6, 5))
-            ax = fig.add_subplot(111)
-            if tica_coord_full is not None:
+                top_file = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_from_mae.pdb"
+                if not Path(top_file).exists():
+                    logger.warning(f"Topology file not found: {top_file}")
+                    continue
+                try:
+                    traj = md.load(str(traj_file), top=top_file)
+                    ca_resid_pair = np.array([(a.index, b.index) for a, b in combinations(list(traj.topology.residues), 2)])
+                    ca_pair_contacts, _ = md.compute_contacts(traj, scheme="ca", contacts=ca_resid_pair, periodic=False)
+                    ca_pair_contacts_switch = (1 - np.power(ca_pair_contacts / 0.8, 6)) / (1 - np.power(ca_pair_contacts / 0.8, 12))
+                    tica_coord = tica_model.transform(ca_pair_contacts_switch)
+                except Exception as e:
+                    logger.warning(f"Error processing trajectory for seed {seed}: {e}")
+                    continue
+            
+                # Create plot
+                fig = plt.figure(figsize=(6, 5))
+                ax = fig.add_subplot(111)
                 h = ax.hist2d(
                     tica_coord_full[:, 0], tica_coord_full[:, 1], 
                     bins=100, norm=LogNorm(), alpha=0.3
                 )
                 plt.colorbar(h[3], ax=ax, label='Log Density')
-            ax.scatter(
-                tica_coord[:, 0], tica_coord[:, 1], 
-                color=blue, s=2, alpha=0.5,
-            )
-            ax.set_xlabel("TIC 1")
-            ax.set_ylabel("TIC 2")
-            ax.set_title(f'TICA Scatter Plot - {cfg.method}')
-            ax.grid(True, alpha=0.3)
-            
-            # Save plot
-            plot_path = analysis_dir / f"tica_scatter_{seed}.png"
-            plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-            logger.info(f"TICA scatter plot saved to {plot_path}")
-            wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
-            plt.close()
-        
+                ax.scatter(
+                    tica_coord[:, 0], tica_coord[:, 1], 
+                    color=blue, s=2, alpha=0.5,
+                )
+                ax.set_xlabel("TIC 1")
+                ax.set_ylabel("TIC 2")
+                ax.set_title(f'TICA Scatter Plot - {cfg.method}')
+                ax.grid(True, alpha=0.3)
+                
+                # Save plot
+                plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+                logger.info(f"TICA scatter plot saved to {plot_path}")
+                wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
+                plt.close()
+    
     except Exception as e:
         logger.error(f"Error in TICA scatter analysis: {e}")
-        raise
+        raise    
 
 
 def plot_cv_over_time(
@@ -630,38 +642,43 @@ def plot_cv_over_time(
         desc="Computing CV over time"
     )
     for seed in pbar:
-        try:
-            colvar_file = log_dir / f"{seed}" / "COLVAR"
-            if not colvar_file.exists():
-                logger.warning(f"COLVAR file not found: {colvar_file}")
-                continue
-            traj_dat = np.genfromtxt(colvar_file, skip_header=1)
-            time = traj_dat[:, 0] / 1000
-            cv = traj_dat[:, 1]
-            
-            # Create plots
-            fig = plt.figure(figsize=(5, 3))
-            ax = fig.add_subplot(111)
-            ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, color=blue)
-            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
-            ax.set_yticks([-1, -0.5, 0, 0.5, 1])
-            ax.set_xlabel("Time (ns)")
-            ax.set_ylabel("CV Values")
-            ax.set_title(f"CV Evolution - {cfg.method} {seed}")
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-            
-            # Save plot
-            plot_path = analysis_dir / f"cv_over_time_{seed}.png"
-            plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-            logger.info(f"CV over time plot saved to {plot_path}")
-            wandb.log({
-                f"cv_over_time_{seed}": wandb.Image(str(plot_path))
-            })
-            plt.close()
-            
-        except Exception as e:
-            logger.error(f"Error in CV over time analysis: {e}")
+        plot_path = analysis_dir / f"cv_over_time_{seed}.png"
+        if os.path.exists(plot_path):
+            print(f"✓ CV over time plot already exists: {plot_path}")
+            continue
+        
+        else:
+            try:
+                colvar_file = log_dir / f"{seed}" / "COLVAR"
+                if not colvar_file.exists():
+                    logger.warning(f"COLVAR file not found: {colvar_file}")
+                    continue
+                traj_dat = np.genfromtxt(colvar_file, skip_header=1)
+                time = traj_dat[:, 0] / 1000
+                cv = traj_dat[:, 1]
+                
+                # Create plots
+                fig = plt.figure(figsize=(5, 3))
+                ax = fig.add_subplot(111)
+                ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, color=blue)
+                ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
+                ax.set_yticks([-1, -0.5, 0, 0.5, 1])
+                ax.set_xlabel("Time (ns)")
+                ax.set_ylabel("CV Values")
+                ax.set_title(f"CV Evolution - {cfg.method} {seed}")
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+                
+                # Save plot
+                plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+                logger.info(f"CV over time plot saved to {plot_path}")
+                wandb.log({
+                    f"cv_over_time_{seed}": wandb.Image(str(plot_path))
+                })
+                plt.close()
+                
+            except Exception as e:
+                logger.error(f"Error in CV over time analysis: {e}")
             raise
 
 
