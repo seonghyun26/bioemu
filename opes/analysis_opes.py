@@ -570,7 +570,9 @@ def plot_tica_scatter(
         if Path(tica_coord_path).exists():
             tica_coord_full = np.load(tica_coord_path)
         else:
-            logger.warning(f"Full CAD dataset not found: {tica_coord_path}")
+            cad_full_path = f"./dataset/{cfg.molecule.upper()}-all/cad-switch.pt" if cfg.molecule == "cln025" else f"./dataset/{cfg.molecule.upper()}-all/cad.pt"
+            cad_full = torch.load(cad_full_path).numpy()
+            tica_coord_full = tica_model.transform(cad_full)
     
         # Process simulation trajectory
         pbar = tqdm(
