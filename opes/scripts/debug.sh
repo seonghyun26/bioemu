@@ -5,15 +5,15 @@ molecule=${1:-"2jof"}
 date="debug"
 echo $date
 
-# python main.py \
-#     --config-name $method-$molecule \
-#     date=$date \
-#     +tags=['debug'] \
-#     opes.max_seed=0 \
-#     opes.step=10000 \
-#     start_gpu=0
+python main.py \
+    --config-name $method-$molecule \
+    date=$date \
+    +tags=['debug'] \
+    opes.max_seed=0 \
+    opes.step=10000 \
+    start_gpu=0
 
-# wait 
+wait 
 
 python analysis_opes.py \
     --config-name $method-$molecule \
