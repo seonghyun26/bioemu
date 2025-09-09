@@ -126,6 +126,23 @@ class OPESSimulationRunner:
         gpu_id = seed + self.cfg.start_gpu
         
         # GROMACS command
+        # if self.cfg.gpu == 0:
+        #     logger.info(f"Running GROMACS simulation for seed {seed} on CPU")
+        #     cmd = [
+        #         "gmx", "mdrun",
+        #         "-s", f"./data/{self.molecule.upper()}/nvt_0.tpr",
+        #         "-deffnm", str(seed_dir),
+        #         "-plumed", str(plumed_file),
+        #         "-nsteps", str(self.step),
+        #         "-reseed", str(seed),
+        #         "-ntomp", "1",
+        #         "-bonded", "cpu",
+        #         "-nb", "cpu",
+        #         "-pin", "on",
+        #         "-pme", "cpu",
+        #     ]
+        # else:
+            # logger.info(f"Running GROMACS simulation for seed {seed} on GPU")
         cmd = [
             "gmx", "mdrun",
             "-s", f"./data/{self.molecule.upper()}/nvt_0.tpr",
@@ -137,15 +154,15 @@ class OPESSimulationRunner:
             "-bonded", "gpu",
             "-nb", "gpu",
             "-pme", "gpu",
+            "-dlb", "no"
             # "-pin", "on"
             # "-tunepme",
             # "-update", "gpu",
-            # "-dlb"
         ]
         
         env = os.environ.copy()
         env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
-        env['GMX_CUDA_GRAPH'] = "1"
+        # env['GMX_CUDA_GRAPH'] = "1"
         logger.info(f"Running GROMACS simulation for seed {seed} on GPU {gpu_id}")
         logger.info(f"Command: {' '.join(cmd)}")
         

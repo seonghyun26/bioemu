@@ -1,22 +1,22 @@
 cd ../
 
-method="tica"
-molecule=${1:-"1fme"}
+# method="tica"
+# molecule=${1:-"1fme"}
 date="debug"
 echo $date
 
-# python main.py \
-#     --config-name $method-$molecule \
-#     date=$date \
-#     +tags=['debug'] \
-#     opes.max_seed=0 \
-#     opes.step=10000 \
-#     start_gpu=0
+python main.py \
+    --config-name debug \
+    date=$date \
+    +tags=['debug'] \
+    opes.max_seed=0 \
+    opes.step=100_000 \
+    start_gpu=0 \
 
-# wait 
+wait 
 
 python analysis_opes.py \
-    --config-name $method-$molecule \
+    --config-name debug \
     date=$date \
     +tags=['debug'] \
     opes.max_seed=0 \

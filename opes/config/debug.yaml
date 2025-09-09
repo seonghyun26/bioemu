@@ -1,16 +1,15 @@
-method: tda
 molecule: 1fme
+method: tica
 ckpt_dir: _baseline_
-ckpt_path: tda-1FME
+ckpt_path: tica-1FME
 date: debug
 tags: ['opes']
 start_gpu: 0
 opes:
-  ntomp: 1
-  step: 10_000
+  step: 100_000
   sigma: 0.05
   max_seed: 3
 analysis:
-  skip_steps: 0
-  unit_steps: 1
+  skip_steps: 50000
+  unit_steps: 25000
   equil_temp: 325
