@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 
 def gmx_process_trajectory(
+    cfg,
+    data_dir: Path,
     log_dir: Path,
     analysis_dir: Path,
     max_seed: int
@@ -45,6 +47,7 @@ def gmx_process_trajectory(
         range(max_seed + 1),
         desc="Post processing trajectory"
     )
+    data_dir = data_dir
     for seed in pbar:
         trj_save_path = f"{analysis_dir}/{seed}_tc.xtc"
         if os.path.exists(trj_save_path):
@@ -55,8 +58,8 @@ def gmx_process_trajectory(
             cmd = [
                 "gmx", "trjconv",
                 "-f", f"{log_dir}/{seed}.xtc",
+                "-s", f"{data_dir}/nvt_0.tpr",
                 "-pbc", "nojump",
-                "-center",
                 "-o", trj_save_path,
             ]
             
@@ -64,6 +67,7 @@ def gmx_process_trajectory(
             try:
                 process = subprocess.run(
                     cmd,
+                    input="0\n0\n",
                     capture_output=True,
                     text=True
                 )
@@ -211,112 +215,120 @@ def plot_pmf(
     reference_cvs: np.ndarray,
 ):
     equil_temp = 340
-    all_cv_grids = []
-    all_pmfs = []
+    plot_path = analysis_dir / "pmf.png"
+    if os.path.exists(plot_path):
+        print(f"✓ PMF plot already exists: {plot_path}")
+        return
     
-    # Check CV range
-    print(f"> Computing OPES PMF CVs range")
-    cv_mins = []
-    cv_maxs = []
-    pbar = tqdm(
-        range(max_seed + 1),
-        desc="Checking CV range"
-    )
-    for seed in pbar:
-        colvar_file = log_dir / f"{seed}" / "COLVAR"
-        if not colvar_file.exists():
-            logger.warning(f"COLVAR file not found: {colvar_file}")
-            continue
-        colvar_data = np.genfromtxt(colvar_file, skip_header=1)
-        cv = colvar_data[:, 1]
-        cv_grid = np.arange(cv.min(), cv.max() + sigma / 2, sigma)
-        all_cv_grids.append(cv_grid)
-        cv_mins.append(cv.min())
-        cv_maxs.append(cv.max())
-    cv_grid_min = np.min(cv_mins) if len(cv_mins) > 0 else 0.0
-    cv_grid_max = np.max(cv_maxs) if len(cv_maxs) > 0 else 0.0
-    cv_grid_min = min(cv_grid_min, -1.0)
-    cv_grid_max = max(cv_grid_max, 1.0)
-    cv_grid = np.arange(cv_grid_min - sigma / 2, cv_grid_max + sigma / 2, sigma)
-    
-    # Compute PMF
-    pbar = tqdm(
-        range(max_seed + 1),
-        desc="Computing OPES PMF"
-    )
-    for seed in pbar:
-        colvar_file = log_dir / f"{seed}" / "COLVAR"
-        colvar_data = np.genfromtxt(colvar_file, skip_header=1)
-        cv = colvar_data[:, 1]
-        bias = colvar_data[:, 2]
-        beta = 1.0 / (R * equil_temp)
-        W = np.exp(beta * bias)  
-        pmf, _ = mbar.pmf_from_weights(
+    else:
+        print(f"> Computing PMF")
+        
+        all_cv_grids = []
+        all_pmfs = []
+        
+        # Check CV range
+        print(f"> Computing OPES PMF CVs range")
+        cv_mins = []
+        cv_maxs = []
+        pbar = tqdm(
+            range(max_seed + 1),
+            desc="Checking CV range"
+        )
+        for seed in pbar:
+            colvar_file = log_dir / f"{seed}" / "COLVAR"
+            if not colvar_file.exists():
+                logger.warning(f"COLVAR file not found: {colvar_file}")
+                continue
+            colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+            cv = colvar_data[:, 1]
+            cv_grid = np.arange(cv.min(), cv.max() + sigma / 2, sigma)
+            all_cv_grids.append(cv_grid)
+            cv_mins.append(cv.min())
+            cv_maxs.append(cv.max())
+        cv_grid_min = np.min(cv_mins) if len(cv_mins) > 0 else 0.0
+        cv_grid_max = np.max(cv_maxs) if len(cv_maxs) > 0 else 0.0
+        cv_grid_min = min(cv_grid_min, -1.0)
+        cv_grid_max = max(cv_grid_max, 1.0)
+        cv_grid = np.arange(cv_grid_min - sigma / 2, cv_grid_max + sigma / 2, sigma)
+        
+        # Compute PMF
+        pbar = tqdm(
+            range(max_seed + 1),
+            desc="Computing OPES PMF"
+        )
+        for seed in pbar:
+            colvar_file = log_dir / f"{seed}" / "COLVAR"
+            colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+            cv = colvar_data[:, 1]
+            bias = colvar_data[:, 2]
+            beta = 1.0 / (R * equil_temp)
+            W = np.exp(beta * bias)  
+            pmf, _ = mbar.pmf_from_weights(
+                cv_grid,
+                cv,
+                W,
+                equil_temp=equil_temp
+            )
+            pmf -= pmf.min()
+            all_pmfs.append(pmf)
+        all_pmfs = np.array(all_pmfs)
+        mean_pmf = np.mean(all_pmfs, axis=0)
+        std_pmf = np.std(all_pmfs, axis=0)
+        
+        # Compute reference PMF
+        print(f"> Computing reference PMF")
+        reference_pmf, _ = mbar.pmf_from_weights(
             cv_grid,
-            cv,
-            W,
+            reference_cvs,
+            weights=np.ones_like(reference_cvs),
             equil_temp=equil_temp
         )
-        pmf -= pmf.min()
-        all_pmfs.append(pmf)
-    all_pmfs = np.array(all_pmfs)
-    mean_pmf = np.mean(all_pmfs, axis=0)
-    std_pmf = np.std(all_pmfs, axis=0)
-    
-    # Compute reference PMF
-    print(f"> Computing reference PMF")
-    reference_pmf, _ = mbar.pmf_from_weights(
-        cv_grid,
-        reference_cvs,
-        weights=np.ones_like(reference_cvs),
-        equil_temp=equil_temp
-    )
-    reference_pmf -= reference_pmf.min()
-    reference_mask = ~np.isnan(reference_pmf)
-    mean_pmf_mask = ~np.isnan(mean_pmf)
-    pmf_mask = reference_mask & mean_pmf_mask
-    pmf_mae = np.mean(np.abs(mean_pmf[pmf_mask] - reference_pmf[pmf_mask]))
+        reference_pmf -= reference_pmf.min()
+        reference_mask = ~np.isnan(reference_pmf)
+        mean_pmf_mask = ~np.isnan(mean_pmf)
+        pmf_mask = reference_mask & mean_pmf_mask
+        pmf_mae = np.mean(np.abs(mean_pmf[pmf_mask] - reference_pmf[pmf_mask]))
 
-    print(f"> Plotting PMF")
-    fig = plt.figure(figsize=(6, 4))
-    ax = fig.add_subplot(111)
-    ax.plot(
-        cv_grid, reference_pmf,
-        color=COLORS[1], linewidth=4, linestyle="--",
-        label="Reference",
-    )
-    ax.plot(
-        cv_grid, mean_pmf,
-        color=blue, linewidth=4,
-    )
-    ax.fill_between(
-        cv_grid, mean_pmf - std_pmf, mean_pmf + std_pmf,
-        alpha=0.2, color=blue, linewidth=1
-    )
-    for idx, pmf in enumerate(all_pmfs):
+        print(f"> Plotting PMF")
+        fig = plt.figure(figsize=(6, 4))
+        ax = fig.add_subplot(111)
         ax.plot(
-            cv_grid, pmf,
-            color=blue, linewidth=2, alpha=0.2,
-            label=f"OPES {idx}"
+            cv_grid, reference_pmf,
+            color=COLORS[1], linewidth=4, linestyle="--",
+            label="Reference",
         )
-    ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
-    ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
-    plt.xticks(fontsize=FONTSIZE_SMALL)
-    plt.yticks(fontsize=FONTSIZE_SMALL)
-    plt.xlabel("CV", fontsize=FONTSIZE_SMALL)
-    plt.ylabel("PMF [kJ/mol]", fontsize=FONTSIZE_SMALL)
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(analysis_dir / "pmf.png", dpi=300, bbox_inches="tight")
-    logger.info(f"PMF plot saved to {analysis_dir}/pmf.png")
-    wandb.log({
-        "pmf": wandb.Image(str(analysis_dir / "pmf.png")),
-        "pmf_mae": pmf_mae,
-        "pmf_std": std_pmf[~np.isnan(std_pmf)].mean()
-    })
-    plt.close()
-    
-    return
+        ax.plot(
+            cv_grid, mean_pmf,
+            color=blue, linewidth=4,
+        )
+        ax.fill_between(
+            cv_grid, mean_pmf - std_pmf, mean_pmf + std_pmf,
+            alpha=0.2, color=blue, linewidth=1
+        )
+        for idx, pmf in enumerate(all_pmfs):
+            ax.plot(
+                cv_grid, pmf,
+                color=blue, linewidth=2, alpha=0.2,
+                label=f"OPES {idx}"
+            )
+        ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
+        plt.xticks(fontsize=FONTSIZE_SMALL)
+        plt.yticks(fontsize=FONTSIZE_SMALL)
+        plt.xlabel("CV", fontsize=FONTSIZE_SMALL)
+        plt.ylabel("PMF [kJ/mol]", fontsize=FONTSIZE_SMALL)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+        logger.info(f"PMF plot saved to {plot_path}")
+        wandb.log({
+            "pmf": wandb.Image(str(plot_path)),
+            "pmf_mae": pmf_mae,
+            "pmf_std": std_pmf[~np.isnan(std_pmf)].mean()
+        })
+        plt.close()
+        
+        return
 
 
 def plot_free_energy_curve(
@@ -326,152 +338,159 @@ def plot_free_energy_curve(
     analysis_dir: Path,
     reference_cvs: np.ndarray,
 ):
-    # ns_per_step = 0.004
-    # skip_steps = 50000
-    skip_steps = cfg.analysis.skip_steps
-    unit_steps = cfg.analysis.unit_steps
-    equil_temp = cfg.analysis.equil_temp
-    all_times = []
-    all_cvs = []
-    all_delta_fs = []
+    plot_path = analysis_dir / "free_energy_curve.png"
+    if os.path.exists(plot_path):
+        print(f"✓ Free energy curve plot already exists: {plot_path}")
+        return
     
-    # Compute Delta F
-    print(f"> Computing Delta F")
-    pbar = tqdm(
-        range(max_seed + 1),
-        desc="Computing Delta F"
-    )
-    for seed in pbar:
-        colvar_file = log_dir / f"{seed}" / "COLVAR"
-        try:
-            colvar_data = np.genfromtxt(colvar_file, skip_header=1)
-            time = colvar_data[:, 0]
-            cv = colvar_data[:, 1]
-            bias = colvar_data[:, 2]
-            total_steps = len(colvar_data)
-            step_grid = np.arange(
-                skip_steps + unit_steps, total_steps, unit_steps
-            )
-            cv_thresh = [
-                -2, 0, 2
-            ]
-            beta = 1.0 / (R * equil_temp)
-            W = np.exp(beta * bias)  
-            all_cvs.append(cv)
-            all_times.append(time[step_grid] * 0.001)
+    else:
+        print(f"> Computing free energy curve")
             
-            Delta_Fs = []
-            for current_step in tqdm(step_grid):
-                cv_t = cv[skip_steps:current_step]
-                W_t = W[skip_steps:current_step]
-                Delta_F = DeltaF_fromweights(
-                    xi_traj=cv_t,
-                    weights=W_t,
-                    cv_thresh=cv_thresh,
-                    T=equil_temp,
+        # ns_per_step = 0.004
+        # skip_steps = 50000
+        skip_steps = cfg.analysis.skip_steps
+        unit_steps = cfg.analysis.unit_steps
+        equil_temp = cfg.analysis.equil_temp
+        all_times = []
+        all_cvs = []
+        all_delta_fs = []
+        
+        # Compute Delta F
+        print(f"> Computing Delta F")
+        pbar = tqdm(
+            range(max_seed + 1),
+            desc="Computing Delta F"
+        )
+        for seed in pbar:
+            colvar_file = log_dir / f"{seed}" / "COLVAR"
+            try:
+                colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+                time = colvar_data[:, 0]
+                cv = colvar_data[:, 1]
+                bias = colvar_data[:, 2]
+                total_steps = len(colvar_data)
+                step_grid = np.arange(
+                    skip_steps + unit_steps, total_steps, unit_steps
                 )
-                Delta_Fs.append(Delta_F)
-            Delta_Fs = np.array(Delta_Fs)
-            all_delta_fs.append(Delta_Fs)
-            
-        except Exception as e:
-            logger.warning(f"Error processing data for seed {seed}: {e}")
-            continue
-    
-    # Compute mean and std of delta F
-    print(f"> Computing mean and std of delta F")
-    # all_delta_fs = np.array(all_delta_fs)
-    # if np.all(np.isnan(all_delta_fs)):
-    #     logger.warning("No valid data found for free energy analysis")
-    #     return
-    # all_delta_fs[~np.isfinite(all_delta_fs)] = np.nan
-    # mean_delta_fs = np.nanmean(all_delta_fs, axis=0)
-    # std_delta_fs  = np.nanstd(all_delta_fs, axis=0)
-    # time_axis = all_times[0]
+                cv_thresh = [
+                    -2, 0, 2
+                ]
+                beta = 1.0 / (R * equil_temp)
+                W = np.exp(beta * bias)  
+                all_cvs.append(cv)
+                all_times.append(time[step_grid] * 0.001)
+                
+                Delta_Fs = []
+                for current_step in tqdm(step_grid):
+                    cv_t = cv[skip_steps:current_step]
+                    W_t = W[skip_steps:current_step]
+                    Delta_F = DeltaF_fromweights(
+                        xi_traj=cv_t,
+                        weights=W_t,
+                        cv_thresh=cv_thresh,
+                        T=equil_temp,
+                    )
+                    Delta_Fs.append(Delta_F)
+                Delta_Fs = np.array(Delta_Fs)
+                all_delta_fs.append(Delta_Fs)
+                
+            except Exception as e:
+                logger.warning(f"Error processing data for seed {seed}: {e}")
+                continue
+        
+        # Compute mean and std of delta F
+        print(f"> Computing mean and std of delta F")
+        # all_delta_fs = np.array(all_delta_fs)
+        # if np.all(np.isnan(all_delta_fs)):
+        #     logger.warning("No valid data found for free energy analysis")
+        #     return
+        # all_delta_fs[~np.isfinite(all_delta_fs)] = np.nan
+        # mean_delta_fs = np.nanmean(all_delta_fs, axis=0)
+        # std_delta_fs  = np.nanstd(all_delta_fs, axis=0)
+        # time_axis = all_times[0]
 
-    max_len = max([len(x) for x in all_delta_fs])
-    padded = np.full((len(all_delta_fs), max_len), np.nan, dtype=float)
-    for i, x in enumerate(all_delta_fs):
-        padded[i, :len(x)] = x
-    idx_longest = int(np.argmax([len(t) for t in all_times]))
-    time_axis = all_times[idx_longest]
-    all_delta_fs = padded
-    
-    # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
-    has_data = (~np.isnan(all_delta_fs)) & (~np.isinf(all_delta_fs))
-    valid_values = padded * has_data.astype(float)
-    mean_delta_fs = np.nanmean(valid_values, axis=0)
-    std_delta_fs  = np.nanstd(valid_values,  axis=0)
-    
-    # Compute reference Delta F
-    print(f"> Computing reference Delta F")
-    reference_weights = np.ones_like(reference_cvs)
-    reference_cv_thresh = [reference_cvs.min(), (reference_cvs.min() + reference_cvs.max()) / 2, reference_cvs.max()]
-    reference_Delta_F = DeltaF_fromweights(
-        xi_traj=reference_cvs,
-        weights=reference_weights,
-        cv_thresh=reference_cv_thresh,
-        T=equil_temp,
-    )
-    
-    # Plot
-    fig = plt.figure(figsize=(6, 4))
-    ax = fig.add_subplot(111)
-    if reference_Delta_F is not None and not np.isnan(reference_Delta_F):
-        ax.axhline(
-            y=reference_Delta_F, color=COLORS[1], linestyle='--', 
-            label='Reference', linewidth=4
+        max_len = max([len(x) for x in all_delta_fs])
+        padded = np.full((len(all_delta_fs), max_len), np.nan, dtype=float)
+        for i, x in enumerate(all_delta_fs):
+            padded[i, :len(x)] = x
+        idx_longest = int(np.argmax([len(t) for t in all_times]))
+        time_axis = all_times[idx_longest]
+        all_delta_fs = padded
+        
+        # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
+        has_data = (~np.isnan(all_delta_fs)) & (~np.isinf(all_delta_fs))
+        valid_values = padded * has_data.astype(float)
+        mean_delta_fs = np.nanmean(valid_values, axis=0)
+        std_delta_fs  = np.nanstd(valid_values,  axis=0)
+        
+        # Compute reference Delta F
+        print(f"> Computing reference Delta F")
+        reference_weights = np.ones_like(reference_cvs)
+        reference_cv_thresh = [reference_cvs.min(), (reference_cvs.min() + reference_cvs.max()) / 2, reference_cvs.max()]
+        reference_Delta_F = DeltaF_fromweights(
+            xi_traj=reference_cvs,
+            weights=reference_weights,
+            cv_thresh=reference_cv_thresh,
+            T=equil_temp,
         )
-        ax.fill_between(
-            [0, time_axis[-1]], reference_Delta_F - 4, reference_Delta_F + 4,
-            color=COLORS[1], alpha=0.2
-        )
-    mask = ~np.isnan(mean_delta_fs)
-    if np.any(mask):
-        ax.plot(
-            time_axis[mask], mean_delta_fs[mask], 
-            color=blue, linewidth=4
-        )
-        ax.fill_between(
-            time_axis[mask], 
-            mean_delta_fs[mask] - std_delta_fs[mask],
-            mean_delta_fs[mask] + std_delta_fs[mask],
-            alpha=0.2, color=blue, linewidth=1
-        )
-    for idx, delta_f in enumerate(all_delta_fs):
-        mask = ~np.isnan(delta_f)
+        
+        # Plot
+        fig = plt.figure(figsize=(6, 4))
+        ax = fig.add_subplot(111)
+        if reference_Delta_F is not None and not np.isnan(reference_Delta_F):
+            ax.axhline(
+                y=reference_Delta_F, color=COLORS[1], linestyle='--', 
+                label='Reference', linewidth=4
+            )
+            ax.fill_between(
+                [0, time_axis[-1]], reference_Delta_F - 4, reference_Delta_F + 4,
+                color=COLORS[1], alpha=0.2
+            )
+        mask = ~np.isnan(mean_delta_fs)
         if np.any(mask):
             ax.plot(
-                time_axis[mask], delta_f[mask],
-                color=blue, linewidth=2, alpha=0.2,
-                label=f"OPES {idx}"
+                time_axis[mask], mean_delta_fs[mask], 
+                color=blue, linewidth=4
             )
-    ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
-    ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
-    ax.set_xlim(0.0, time_axis[-1])
-    plt.xticks(fontsize=FONTSIZE_SMALL)
-    plt.yticks(fontsize=FONTSIZE_SMALL)
-    plt.xlabel('Time [ns]', fontsize=FONTSIZE_SMALL)
-    plt.ylabel(r'$\Delta F$ [kJ/mol]', fontsize=FONTSIZE_SMALL)
-    # plt.title(f'Free Energy Difference (CVs) - {cfg.method}')
-    # plt.legend(fontsize=FONTSIZE_SMALL)
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    
-    # Logging
-    plot_path = analysis_dir / "free_energy_curve.png"
-    plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-    logger.info(f"Free energy curve saved to {plot_path}")
-    wandb.log({
-        "free_energy_curve": wandb.Image(str(plot_path)),
-        "free_energy_difference": mean_delta_fs[-1],
-        "free_energy_difference_std": std_delta_fs[-1],
-        "free_energy_difference_reference": reference_Delta_F,
-        "free_energy_difference_mae": np.abs(mean_delta_fs[-1] - reference_Delta_F)
-    })
-    plt.close()
-    
-    return
+            ax.fill_between(
+                time_axis[mask], 
+                mean_delta_fs[mask] - std_delta_fs[mask],
+                mean_delta_fs[mask] + std_delta_fs[mask],
+                alpha=0.2, color=blue, linewidth=1
+            )
+        for idx, delta_f in enumerate(all_delta_fs):
+            mask = ~np.isnan(delta_f)
+            if np.any(mask):
+                ax.plot(
+                    time_axis[mask], delta_f[mask],
+                    color=blue, linewidth=2, alpha=0.2,
+                    label=f"OPES {idx}"
+                )
+        ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
+        ax.set_xlim(0.0, time_axis[-1])
+        plt.xticks(fontsize=FONTSIZE_SMALL)
+        plt.yticks(fontsize=FONTSIZE_SMALL)
+        plt.xlabel('Time [ns]', fontsize=FONTSIZE_SMALL)
+        plt.ylabel(r'$\Delta F$ [kJ/mol]', fontsize=FONTSIZE_SMALL)
+        # plt.title(f'Free Energy Difference (CVs) - {cfg.method}')
+        # plt.legend(fontsize=FONTSIZE_SMALL)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        
+        # Logging
+        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+        logger.info(f"Free energy curve saved to {plot_path}")
+        wandb.log({
+            "free_energy_curve": wandb.Image(str(plot_path)),
+            "free_energy_difference": mean_delta_fs[-1],
+            "free_energy_difference_std": std_delta_fs[-1],
+            "free_energy_difference_reference": reference_Delta_F,
+            "free_energy_difference_mae": np.abs(mean_delta_fs[-1] - reference_Delta_F)
+        })
+        plt.close()
+        
+        return
 
 
 def plot_rmsd_analysis(
@@ -595,12 +614,13 @@ def plot_tica_scatter(
             
             else:
                 # Load trajectory data
-                traj_file = log_dir / f"{seed}.xtc"
+                traj_file = analysis_dir / f"{seed}_tc.xtc"
                 if not traj_file.exists()   :
                     logger.warning(f"No trajectory file found for seed {seed}")
                     continue
 
-                top_file = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_from_mae.pdb"
+                # top_file = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_from_mae.pdb"
+                top_file = f"./data/{cfg.molecule.upper()}/folded.gro"
                 if not Path(top_file).exists():
                     logger.warning(f"Topology file not found: {top_file}")
                     continue
@@ -608,8 +628,11 @@ def plot_tica_scatter(
                     traj = md.load(str(traj_file), top=top_file)
                     ca_resid_pair = np.array([(a.index, b.index) for a, b in combinations(list(traj.topology.residues), 2)])
                     ca_pair_contacts, _ = md.compute_contacts(traj, scheme="ca", contacts=ca_resid_pair, periodic=False)
-                    ca_pair_contacts_switch = (1 - np.power(ca_pair_contacts / 0.8, 6)) / (1 - np.power(ca_pair_contacts / 0.8, 12))
-                    tica_coord = tica_model.transform(ca_pair_contacts_switch)
+                    if cfg.molecule == "cln025":
+                        ca_pair_contacts_switch = (1 - np.power(ca_pair_contacts / 0.8, 6)) / (1 - np.power(ca_pair_contacts / 0.8, 12))
+                        tica_coord = tica_model.transform(ca_pair_contacts_switch)
+                    else:
+                        tica_coord = tica_model.transform(ca_pair_contacts)
                 except Exception as e:
                     logger.warning(f"Error processing trajectory for seed {seed}: {e}")
                     continue
@@ -706,6 +729,7 @@ def main(cfg):
     
     # Setup paths
     base_simulation_dir = Path(f"{os.getcwd()}/simulations") / cfg.molecule / cfg.method
+    data_dir = Path(f"{os.getcwd()}/data") / cfg.molecule.upper()
     log_dir = base_simulation_dir / cfg.date
     analysis_dir = log_dir / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
@@ -723,7 +747,7 @@ def main(cfg):
     
     try:
         # logger.info("Post processing trajectory...")
-        gmx_process_trajectory(log_dir, analysis_dir, max_seed)
+        gmx_process_trajectory(cfg, data_dir, log_dir, analysis_dir, max_seed)
         gmx_process_energy(log_dir, analysis_dir, max_seed)
         
         # Run analysis functions
