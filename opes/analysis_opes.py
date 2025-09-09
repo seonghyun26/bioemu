@@ -416,6 +416,7 @@ def plot_free_energy_curve(
         idx_longest = int(np.argmax([len(t) for t in all_times]))
         time_axis = all_times[idx_longest]
         all_delta_fs = padded
+        print(time_axis)
         
         # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
         has_data = (~np.isnan(all_delta_fs)) & (~np.isinf(all_delta_fs))
