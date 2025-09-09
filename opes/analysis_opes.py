@@ -59,7 +59,7 @@ def gmx_process_trajectory(
                 "gmx", "trjconv",
                 "-f", f"{log_dir}/{seed}.xtc",
                 "-s", f"{data_dir}/nvt_0.tpr",
-                "-pbc", "nojump",
+                "-pbc", "mol",
                 "-o", trj_save_path,
             ]
             
@@ -577,7 +577,6 @@ def plot_tica_scatter(
             tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_switch_lag10.pkl"
         else:
             tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_lag10.pkl"
-            
         with open(tica_model_path, 'rb') as f:
             tica_model = pickle.load(f)
         
