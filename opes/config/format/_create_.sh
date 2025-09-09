@@ -1,6 +1,6 @@
 
 molecule=$1
-methods=("ours" "tae" "tda" "tica" "vde")
+methods=("tae" "tda" "tica" "vde")
 input="$1.dat"
 
 for method in "${methods[@]}"; do

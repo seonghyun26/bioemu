@@ -345,7 +345,6 @@ def plot_free_energy_curve(
     
     else:
         print(f"> Computing free energy curve")
-            
         # ns_per_step = 0.004
         # skip_steps = 50000
         skip_steps = cfg.analysis.skip_steps
@@ -400,15 +399,6 @@ def plot_free_energy_curve(
         
         # Compute mean and std of delta F
         print(f"> Computing mean and std of delta F")
-        # all_delta_fs = np.array(all_delta_fs)
-        # if np.all(np.isnan(all_delta_fs)):
-        #     logger.warning("No valid data found for free energy analysis")
-        #     return
-        # all_delta_fs[~np.isfinite(all_delta_fs)] = np.nan
-        # mean_delta_fs = np.nanmean(all_delta_fs, axis=0)
-        # std_delta_fs  = np.nanstd(all_delta_fs, axis=0)
-        # time_axis = all_times[0]
-
         max_len = max([len(x) for x in all_delta_fs])
         padded = np.full((len(all_delta_fs), max_len), np.nan, dtype=float)
         for i, x in enumerate(all_delta_fs):
@@ -416,7 +406,6 @@ def plot_free_energy_curve(
         idx_longest = int(np.argmax([len(t) for t in all_times]))
         time_axis = all_times[idx_longest]
         all_delta_fs = padded
-        print(time_axis)
         
         # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
         has_data = (~np.isnan(all_delta_fs)) & (~np.isinf(all_delta_fs))
