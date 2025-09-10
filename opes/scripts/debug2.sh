@@ -1,7 +1,7 @@
 cd ../
 
 method="tica"
-molecule=${1:-"1fme"}
+ntomp=${1:-"1"}
 date="debug"
 echo $date
 
@@ -10,7 +10,7 @@ python main.py \
     date=$date \
     +tags=['debug'] \
     start_gpu=0  \
-    opes.ntomp=1
+    opes.ntomp=$ntomp
 
 # wait 
 

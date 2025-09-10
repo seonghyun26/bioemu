@@ -1,7 +1,6 @@
 cd ../
 
 method="tica"
-molecule=${1:-"1fme"}
 ntomp=${2:-"1"}
 date="debug"
 echo $date
