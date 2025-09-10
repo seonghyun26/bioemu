@@ -458,7 +458,10 @@ def plot_free_energy_curve(
                     label=f"OPES {idx}"
                 )
         ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
-        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
+        ax.set_yticks([-20, 0, 20, 40])
+        # if cfg.molecule == "cln025":
+        # else:
+        #     ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
         ax.set_xlim(0.0, time_axis[-1])
         plt.xticks(fontsize=FONTSIZE_SMALL)
         plt.yticks(fontsize=FONTSIZE_SMALL)

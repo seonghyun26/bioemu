@@ -76,6 +76,7 @@ class OPESSimulationRunner:
         source_plumed = Path("./config") / f"{self.cfg.method}-{self.molecule}.dat"
         target_plumed = seed_dir / "plumed.dat"
         shutil.copy2(source_plumed, target_plumed)
+        logger.info(f"Copied PLUMED configuration: {source_plumed} to {target_plumed}")
         # if target_plumed.exists() or target_plumed.is_symlink():
         #     target_plumed.unlink()
         # target_plumed.symlink_to(source_plumed.resolve())
@@ -84,6 +85,7 @@ class OPESSimulationRunner:
         source_mlcv_model = self.mlcv_path
         target_mlcv_model = seed_dir / f"{self.cfg.ckpt_path}-jit.pt"
         shutil.copy2(source_mlcv_model, target_mlcv_model)
+        logger.info(f"Copied MLCV model: {source_mlcv_model} to {target_mlcv_model}")
         # if target_mlcv_model.exists() or target_mlcv_model.is_symlink():
         #     target_mlcv_model.unlink()
         # target_mlcv_model.symlink_to(source_mlcv_model.resolve())
@@ -149,37 +151,47 @@ class OPESSimulationRunner:
         #     nvt_name = "nvt_1"
         # else:
         #     nvt_name = "nvt_0"
-        nvt_name = "nvt_0"
+        if self.cfg.molecule == "1fme":
+            nvt_name = "md"
+        else:
+            nvt_name = "nvt_0"
+        ntomp_num = 4
         cmd = [
             "gmx", "mdrun",
             "-s", f"./data/{self.molecule.upper()}/{nvt_name}.tpr",
             "-deffnm", str(seed_dir),
-            # "-plumed", str(plumed_file),
+            "-plumed", str(plumed_file),
             "-nsteps", str(self.step),
             "-reseed", str(seed),
-            "-ntomp", "1",
+            "-ntomp", str(ntomp_num),
             "-bonded", "gpu",
             "-nb", "gpu",
-            "-pme", "cpu",
+            "-pme", "gpu",
+            "-pin", "on",
+            "-pinoffset", str(gpu_id * ntomp_num),
             # "-dlb", "no"
-            # "-pin", "on"
             # "-tunepme",
             # "-update", "gpu",
         ]
-        
         env = os.environ.copy()
         env['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
-        # env['GMX_CUDA_GRAPH'] = "1"
-        logger.info(f"Running GROMACS simulation for seed {seed} on GPU {gpu_id}")
-        logger.info(f"Command: {' '.join(cmd)}")
+        env['OMP_NUM_THREADS'] = str(ntomp_num)
+        env['GMX_CUDA_GRAPH'] = "1"
+        seed_dir = Path(self.log_dir) / str(seed)
+        seed_dir.mkdir(parents=True, exist_ok=True)
+        stdout_file = open(seed_dir / "mdrun.out", "wb", buffering=0)
+        stderr_file = open(seed_dir / "mdrun.err", "wb", buffering=0)
         
+        logger.info(f"\nRunning GROMACS simulation for seed {seed} on GPU {gpu_id}")
+        logger.info(f"Command: {' '.join(cmd)}")
         try:
             process = subprocess.Popen(
                 cmd, 
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+                stdout=stdout_file,
+                stderr=stderr_file,
+                text=False,
+                close_fds=True,
             )
             logger.info(f"GROMACS simulation started for seed {seed}")
             return process
@@ -293,7 +305,7 @@ class OPESSimulationRunner:
         
         # Log PLUMED parameters
         params = {}
-        plumed_file = Path("./config") / f"{self.cfg.method}.dat"
+        plumed_file = Path("./config") / f"{self.cfg.method}-{self.molecule}.dat"
         inside_enhance_sampling = False
         prefix = ""
         try:
