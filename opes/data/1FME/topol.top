@@ -2,7 +2,7 @@
 ;	File 'topol.top' was generated
 ;	By user: unknown (0)
 ;	On host: 69957097b7c9
-;	At date: Mon Sep  8 14:34:14 2025
+;	At date: Wed Sep 10 02:25:52 2025
 ;
 ;	This is a standalone topology file
 ;
@@ -4762,8 +4762,10 @@ Protein_chain_A     3
 
 [ system ]
 ; Name
-Protein
+Protein in water
 
 [ molecules ]
 ; Compound        #mols
 Protein_chain_A     1
+SOL         3209
+CL               4

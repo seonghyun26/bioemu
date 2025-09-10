@@ -2,7 +2,7 @@
 ;	File 'mdout.mdp' was generated
 ;	By user: unknown (0)
 ;	On host: 69957097b7c9
-;	At date: Mon Sep  8 14:34:38 2025
+;	At date: Wed Sep 10 07:53:12 2025
 ;
 ;	Created by:
 ;	              :-) GROMACS - gmx grompp, 2024.3-plumed_2.10b (-:
@@ -11,7 +11,7 @@
 ;	Data prefix:  /gromacs/AVX2_256_ts
 ;	Working dir:  /bioemu/opes/data/1FME
 ;	Command line:
-;	  gmx grompp -f 1fme.mdp -c folded.gro -p topol.top -o nvt_0.tpr -maxwarn 2
+;	  gmx grompp -f 1fme_md.mdp -c npt.gro -t npt.cpt -p topol.top -o md.tpr
 
 ; VARIOUS PREPROCESSING OPTIONS
 ; Preprocessor information: use cpp syntax.
@@ -31,7 +31,7 @@ init-step                = 0
 ; Part index is updated automatically on checkpointing (keeps files separate)
 simulation-part          = 1
 ; Multiple time-stepping
-mts                      = No
+mts                      = no
 ; factor by which to increase the mass of the lightest atoms
 mass-repartition-factor  = 1
 ; mode for center of mass motion removal
@@ -44,7 +44,7 @@ comm-grps                =
 ; LANGEVIN DYNAMICS OPTIONS
 ; Friction coefficient (amu/ps) and random seed
 bd-fric                  = 0
-ld-seed                  = -478806109
+ld-seed                  = -1
 
 ; ENERGY MINIMIZATION OPTIONS
 ; Force tolerance and initial step-size
@@ -71,12 +71,12 @@ nstlog                   = 50000
 nstcalcenergy            = 100
 nstenergy                = 50000
 ; Output frequency and precision for .xtc file
-nstxout-compressed       = 100
+nstxout-compressed       = 50000
 compressed-x-precision   = 1000
 ; This selects the subset of atoms for the compressed
 ; trajectory file. You can select multiple groups. By
 ; default, all atoms will be written.
-compressed-x-grps        = 
+compressed-x-grps        = Protein
 ; Selection of energy groups
 energygrps               = 
 
@@ -84,15 +84,15 @@ energygrps               =
 ; cut-off scheme (Verlet: particle based cut-offs)
 cutoff-scheme            = Verlet
 ; nblist update frequency
-nstlist                  = 10
+nstlist                  = 80
 ; Periodic boundary conditions: xyz, no, xy
 pbc                      = xyz
-periodic-molecules       = No
+periodic-molecules       = no
 ; Allowed energy drift due to the Verlet buffer in kJ/mol/ps per atom,
 ; a value of -1 means: use rlist
 verlet-buffer-tolerance  = 0.005
 ; Allowed error in the average pressure due to the Verlet buffer for LJ interactions
-verlet-buffer-pressure-tolerance = -1
+verlet-buffer-pressure-tolerance = 0.5
 ; nblist cut-off        
 rlist                    = 1
 ; long-range cut-off for switched potentials
@@ -100,18 +100,18 @@ rlist                    = 1
 ; OPTIONS FOR ELECTROSTATICS AND VDW
 ; Method for doing electrostatics
 coulombtype              = PME
-coulomb-modifier         = Potential-shift
+coulomb-modifier         = Potential-shift-Verlet
 rcoulomb-switch          = 0
-rcoulomb                 = 1
+rcoulomb                 = 0.95
 ; Relative dielectric constant for the medium and the reaction field
 epsilon-r                = 1
-epsilon-rf               = inf
+epsilon-rf               = 0
 ; Method for doing Van der Waals
 vdw-type                 = Cut-off
-vdw-modifier             = Potential-shift
+vdw-modifier             = Potential-shift-Verlet
 ; cut-off lengths       
 rvdw-switch              = 0
-rvdw                     = 1
+rvdw                     = 0.95
 ; Apply long range dispersion corrections for Energy and Pressure
 DispCorr                 = EnerPres
 ; Extension of the potential lookup tables beyond the cut-off
@@ -119,13 +119,13 @@ table-extension          = 1
 ; Separate tables between energy group pairs
 energygrp-table          = 
 ; Spacing for the PME/PPPM FFT grid
-fourierspacing           = 0.125
+fourierspacing           = 0.16
 ; FFT grid size, when a value is 0 fourierspacing will be used
 fourier-nx               = 32
 fourier-ny               = 32
 fourier-nz               = 32
 ; EWALD/PME/PPPM parameters
-pme-order                = 4
+pme_order                = 4
 ewald-rtol               = 1e-05
 ewald-rtol-lj            = 0.001
 lj-pme-comb-rule         = Geometric
@@ -134,31 +134,31 @@ epsilon-surface          = 0
 implicit-solvent         = no
 
 ; OPTIONS FOR WEAK COUPLING ALGORITHMS
-ensemble-temperature-setting = constant
-ensemble-temperature     = 325
+ensemble-temperature-setting = auto
+ensemble-temperature     = -1
 ; Temperature coupling  
 tcoupl                   = V-rescale
-nsttcouple               = 10
-nh-chain-length          = 0
-print-nose-hoover-chain-variables = No
+nsttcouple               = -1
+nh-chain-length          = 10
+print-nose-hoover-chain-variables = no
 ; Groups to couple separately
-tc-grps                  = Protein
+tc-grps                  = Protein Non-Protein
 ; Time constant (ps) and reference temperature (K)
-tau_t                    = 0.1
-ref_t                    = 325
+tau_t                    = 0.1     0.1
+ref_t                    = 325     325
 ; pressure coupling     
-pcoupl                   = No
-pcoupltype               = Isotropic
+pcoupl                   = Parrinello-Rahman
+pcoupltype               = isotropic
 nstpcouple               = -1
 ; Time constant (ps), compressibility (1/bar) and reference P (bar)
-tau-p                    = 5
-compressibility          = 
-ref-p                    = 
+tau_p                    = 2.0
+compressibility          = 4.5e-5
+ref_p                    = 1.0
 ; Scaling of reference coordinates, No, All or COM
 refcoord-scaling         = No
 
 ; OPTIONS FOR QMMM calculations
-QMMM                     = No
+QMMM                     = no
 ; Groups treated with MiMiC
 QMMM-grps                = 
 
@@ -173,26 +173,26 @@ annealing-time           =
 annealing-temp           = 
 
 ; GENERATE VELOCITIES FOR STARTUP RUN
-gen-vel                  = no
+gen_vel                  = no
 gen-temp                 = 300
-gen-seed                 = -539886854
+gen-seed                 = -25165985
 
 ; OPTIONS FOR BONDS    
-constraints              = none
+constraints              = h-bonds
 ; Type of constraint algorithm
-constraint-algorithm     = Lincs
+constraint_algorithm     = lincs
 ; Do not constrain the start configuration
-continuation             = no
+continuation             = yes
 ; Use successive overrelaxation to reduce the number of shake iterations
 Shake-SOR                = no
 ; Relative tolerance of shake
 shake-tol                = 0.0001
 ; Highest order in the expansion of the constraint coupling matrix
-lincs-order              = 4
+lincs_order              = 4
 ; Number of iterations in the final step of LINCS. 1 is fine for
 ; normal simulations, but use 2 to conserve energy in NVE runs.
 ; For energy minimization with constraints it should be 4 to 8.
-lincs-iter               = 1
+lincs_iter               = 1
 ; Lincs will write a warning to the stderr if in one step a bond
 ; rotates over more degrees than
 lincs-warnangle          = 30

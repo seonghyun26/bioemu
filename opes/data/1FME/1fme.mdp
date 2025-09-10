@@ -1,15 +1,17 @@
+;
+;	File '1fme.mdp' was generated
 ;	By user: unknown (0)
-;	On host: 5ebb58f3f965
-;	At date: Mon Jun  9 12:43:51 2025
+;	On host: 69957097b7c9
+;	At date: Wed Sep 10 02:39:33 2025
 ;
 ;	Created by:
 ;	              :-) GROMACS - gmx grompp, 2024.3-plumed_2.10b (-:
 ;	
 ;	Executable:   /gromacs/AVX2_256_ts/bin/gmx
 ;	Data prefix:  /gromacs/AVX2_256_ts
-;	Working dir:  /mnt/gicv/simulations/unbiased/folded
+;	Working dir:  /bioemu/opes/data/1FME
 ;	Command line:
-;	  gmx grompp -f nvt2.mdp -c nvt2-boxed.gro -p topol.top -o nvt2.tpr
+;	  gmx grompp -f 1fme.mdp -po 1fme.mdp -c folded.gro -p topol.top -o nvt_0.tpr -maxwarn 2
 
 ; VARIOUS PREPROCESSING OPTIONS
 ; Preprocessor information: use cpp syntax.
@@ -100,7 +102,7 @@ rlist                    = 1
 coulombtype              = PME
 coulomb-modifier         = Potential-shift
 rcoulomb-switch          = 0
-rcoulomb                 = 1
+rcoulomb                 = 0.95
 ; Relative dielectric constant for the medium and the reaction field
 epsilon-r                = 1
 epsilon-rf               = inf
