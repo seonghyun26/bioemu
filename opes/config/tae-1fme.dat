@@ -388,7 +388,7 @@ deep: PYTORCH_MODEL ...
 opes: OPES_METAD ...
     ARG=deep.node-0
     PACE=500
-    SIGMA=0.5
+    SIGMA=0.05
     BARRIER=30
     TEMP=325
     FILE=KERNELS
