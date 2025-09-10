@@ -9,6 +9,7 @@ opes:
   step: 10_000
   sigma: 0.05
   max_seed: 3
+  ntomp: 2
 analysis:
   skip_steps: 1
   unit_steps: 0
