@@ -1,8 +1,8 @@
 ;
-;	File 'GTT/topol.top' was generated
+;	File 'topol.top' was generated
 ;	By user: unknown (0)
 ;	On host: 69957097b7c9
-;	At date: Fri Sep  5 14:48:20 2025
+;	At date: Wed Sep 10 14:30:20 2025
 ;
 ;	This is a standalone topology file
 ;
@@ -11,9 +11,9 @@
 ;	
 ;	Executable:   /gromacs/AVX2_256_ts/bin/gmx
 ;	Data prefix:  /gromacs/AVX2_256_ts
-;	Working dir:  /bioemu/opes/data
+;	Working dir:  /bioemu/opes/data/GTT
 ;	Command line:
-;	  gmx pdb2gmx -f GTT/folded.pdb -o GTT/folded.gro -p GTT/topol.top -ff charmm27 -water tip3p --ignh
+;	  gmx pdb2gmx -f folded.pdb -o folded.gro -p topol.top -ff charmm27 -water tip3p --ignh
 ;	Force field was read from the standard GROMACS share directory.
 ;
 
@@ -5349,8 +5349,10 @@ Protein_chain_A     3
 
 [ system ]
 ; Name
-Protein
+Protein in water
 
 [ molecules ]
 ; Compound        #mols
 Protein_chain_A     1
+SOL         3188
+CL               3

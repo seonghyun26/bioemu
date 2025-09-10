@@ -1,7 +1,7 @@
-molecule: 1fme
+molecule: gtt
 method: tica
 ckpt_dir: _baseline_
-ckpt_path: tica-1FME
+ckpt_path: tica-GTT
 date: debug
 tags: ['opes']
 start_gpu: 0
@@ -9,8 +9,8 @@ opes:
   step: 10_000
   sigma: 0.05
   max_seed: 3
-  ntomp: 2
+  ntomp: 1
 analysis:
   skip_steps: 1
   unit_steps: 0
-  equil_temp: 325
+  equil_temp: 360

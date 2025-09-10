@@ -1,0 +1,48 @@
+; NVT equilibration / production for 1FME
+; Based on simulation details: NVT, 9.5 Å cutoff, PME 32×32×32
+
+integrator              = md
+dt                      = 0.002           ; 2 fs
+nsteps                  = 25000          ; 50 ps
+
+; Bond parameters
+continuation            = no        ; first dynamics run
+constraint_algorithm    = lincs     ; holonomic constraints 
+constraints             = h-bonds   ; bonds involving H are constrained
+lincs_iter              = 1         ; accuracy of LINCS
+lincs_order             = 4         ; also related to accuracy
+
+; Neighbors & cutoffs (9.5 Å)
+cutoff-scheme           = Verlet
+nstlist                 = 20
+rlist                   = 0.90
+rcoulomb                = 0.90
+rvdw                    = 0.90
+
+; Electrostatics (PME, 32×32×32 grid)
+coulombtype             = PME
+pme-order               = 4
+fourier-nx              = 32
+fourier-ny              = 32
+fourier-nz              = 32
+pbc                     = xyz
+
+; Thermostat (NVT)
+tcoupl                  = V-rescale
+tc-grps                 = Protein Non-Protein   ; two coupling groups - more accurate
+tau_t                   = 0.1     0.1           ; time constant, in ps
+ref_t                   = 360     360           ; reference temperature, one for each group, in K
+
+; No barostat (NVT)
+pcoupl                  = no
+
+; Velocities
+gen-vel                 = yes
+gen-temp                = 360
+gen-seed                = -1
+
+; Output
+nstxout-compressed      = 500
+nstenergy               = 500
+nstlog                  = 500
+compressed-x-precision  = 500
