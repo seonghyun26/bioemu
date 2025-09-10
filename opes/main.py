@@ -155,7 +155,7 @@ class OPESSimulationRunner:
             nvt_name = "md"
         else:
             nvt_name = "nvt_0"
-        ntomp_num = 4
+        ntomp_num = self.cfg.opes.ntomp
         cmd = [
             "gmx", "mdrun",
             "-s", f"./data/{self.molecule.upper()}/{nvt_name}.tpr",

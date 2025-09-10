@@ -9,8 +9,7 @@ python main.py \
     --config-name debug \
     date=$date \
     +tags=['debug'] \
-    opes.max_seed=3 \
-    start_gpu=0 \
+    start_gpu=0 
 
 # wait 
 
