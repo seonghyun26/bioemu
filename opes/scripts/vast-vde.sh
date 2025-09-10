@@ -8,8 +8,7 @@ echo $date
 python main.py \
     --config-name $method-$molecule \
     date=$date \
-    +tags=['vast'] \
-    opes.ntomp=$2
+    +tags=['vast']
 
 python analysis_opes.py \
     --config-name $method-$molecule \
