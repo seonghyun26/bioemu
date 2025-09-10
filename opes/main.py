@@ -143,18 +143,25 @@ class OPESSimulationRunner:
         #     ]
         # else:
             # logger.info(f"Running GROMACS simulation for seed {seed} on GPU")
+        # if self.cfg.molecule == "1fme":
+        #     nvt_name = "nvt_ions"
+        # elif self.cfg.molecule == "gtt":
+        #     nvt_name = "nvt_1"
+        # else:
+        #     nvt_name = "nvt_0"
+        nvt_name = "nvt_0"
         cmd = [
             "gmx", "mdrun",
-            "-s", f"./data/{self.molecule.upper()}/nvt_0.tpr",
+            "-s", f"./data/{self.molecule.upper()}/{nvt_name}.tpr",
             "-deffnm", str(seed_dir),
-            "-plumed", str(plumed_file),
+            # "-plumed", str(plumed_file),
             "-nsteps", str(self.step),
             "-reseed", str(seed),
             "-ntomp", "1",
             "-bonded", "gpu",
             "-nb", "gpu",
-            "-pme", "gpu",
-            "-dlb", "no"
+            "-pme", "cpu",
+            # "-dlb", "no"
             # "-pin", "on"
             # "-tunepme",
             # "-update", "gpu",

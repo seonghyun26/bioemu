@@ -13,6 +13,7 @@ import numpy as np
 import mdtraj as md
 
 from tqdm import tqdm
+from pprint import pformat
 from itertools import combinations
 from pathlib import Path
 from omegaconf import OmegaConf
@@ -471,13 +472,15 @@ def plot_free_energy_curve(
         # Logging
         plt.savefig(plot_path, dpi=300, bbox_inches="tight")
         logger.info(f"Free energy curve saved to {plot_path}")
-        wandb.log({
+        log_info = {
             "free_energy_curve": wandb.Image(str(plot_path)),
             "free_energy_difference": mean_delta_fs[-1],
             "free_energy_difference_std": std_delta_fs[-1],
             "free_energy_difference_reference": reference_Delta_F,
             "free_energy_difference_mae": np.abs(mean_delta_fs[-1] - reference_Delta_F)
-        })
+        }
+        wandb.log(log_info)
+        logger.info(pformat(log_info, indent=4, width=120))
         plt.close()
         
         return
