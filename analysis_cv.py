@@ -115,7 +115,7 @@ def load_model_and_data(
         TICA_SWITCH = False
     
     model_root_path = "/home/shpark/prj-mlcv/lib/bioemu/opes/model/_baseline_"
-    if model_type == "mlcv":
+    if model_type == "ours":
         if molecule == "CLN025":
             date = date or "0816_171833"
         
@@ -138,16 +138,16 @@ def load_model_and_data(
             raise ValueError(f"Invalid molecule: {molecule} for {model_type}")
         
         device_str = f"cuda:{CUDA_DEVICE}" if torch.cuda.is_available() else "cpu"
-        save_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/mlcv_model-jit.pt"
+        save_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/{date}-{molecule.upper()}-jit.pt"
         mlcv_model = torch.jit.load(save_path, map_location=device_str)
         mlcv_model.eval()
     
-    elif model_type == "mlcv-trans":
-        date = date or "0825_072649"
-        device_str = f"cuda:{CUDA_DEVICE}" if torch.cuda.is_available() else "cpu"
-        save_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/mlcv_model-jit.pt"
-        mlcv_model = torch.jit.load(save_path, map_location=device_str)
-        mlcv_model.eval()
+    # elif model_type == "mlcv-trans":
+    #     date = date or "0825_072649"
+    #     device_str = f"cuda:{CUDA_DEVICE}" if torch.cuda.is_available() else "cpu"
+    #     save_path = f"/home/shpark/prj-mlcv/lib/bioemu/model/{date}/mlcv_model-jit.pt"
+    #     mlcv_model = torch.jit.load(save_path, map_location=device_str)
+    #     mlcv_model.eval()
     
     elif model_type == "tda":
         tda_path = f"{model_root_path}/tda-{molecule}-jit.pt"
@@ -257,7 +257,7 @@ def compute_cv_values(
         
         print(f"CV computation complete. Shape: {cv.shape}")
         
-        if model_type == "mlcv":
+        if model_type == "ours":
             # Normalize CV values for MLCV
             cv_normalized = np.zeros_like(cv)
             
@@ -277,7 +277,7 @@ def compute_cv_values(
                 ref_cv = ref_cv.detach().cpu().numpy()
             
             # Normalize reference CV the same way
-            if model_type == "mlcv":
+            if model_type == "ours":
                 ref_cv_normalized = np.zeros_like(ref_cv)
                 for cv_dim in range(MLCV_DIM):
                     ref_cv_dim_val = ref_cv[:, cv_dim]
@@ -1494,7 +1494,7 @@ def analyze_correlations(
 # MAIN
 def main():
     parser = argparse.ArgumentParser(description='Run CV analysis for different model types')
-    parser.add_argument('--model_type', choices=['mlcv', 'mlcv-trans', 'tda', 'tica', 'tae', 'vde', 'all'], default='all', help='Model type to analyze')
+    parser.add_argument('--model_type', choices=['ours', 'tda', 'tica', 'tae', 'vde', 'all'], default='all', help='Model type to analyze')
     parser.add_argument('--molecule', choices=['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9', 'partial','all'], default='CLN025', help='Molecule to analyze')
     parser.add_argument('--date', type=str, default=None, help='Date string for MLCV model (only used for mlcv)')
     parser.add_argument('--img_dir', type=str, default='/home/shpark/prj-mlcv/lib/bioemu/img/debug', help='Directory to save images')
@@ -1509,11 +1509,10 @@ def main():
         print(f"Using specified CUDA device: cuda:{CUDA_DEVICE}")
     
     # Create image directory if it doesn't exist
-    # model_types = ['mlcv', 'mlcv-trans', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
     os.makedirs(args.img_dir, exist_ok=True)
-    model_types = ['mlcv', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
-    # molecules = ['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9'] if args.molecule == 'all' else [args.molecule]
+    model_types = ['ours', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
     molecules = ['1FME', '2F4K', 'GTT', 'NTL9'] if args.molecule == 'partial' else [args.molecule]
+    # molecules = ['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9'] if args.molecule == 'all' else [args.molecule]
     
     for molecule in molecules:
         img_dir_mol = os.path.join(args.img_dir, molecule)
