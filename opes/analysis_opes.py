@@ -761,7 +761,7 @@ def main(cfg):
     
     try:
         # logger.info("Post processing trajectory...")
-        if cfg.opes.gmx:
+        if cfg.analysis.gmx:
             gmx_process_trajectory(cfg, data_dir, log_dir, analysis_dir, max_seed)
             gmx_process_energy(log_dir, analysis_dir, max_seed)
         else:
