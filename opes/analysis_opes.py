@@ -673,8 +673,9 @@ def plot_cv_over_time(
     )
     for seed in pbar:
         plot_path = analysis_dir / f"cv_over_time_{seed}.png"
-        if os.path.exists(plot_path):
-            print(f"✓ CV over time plot already exists: {plot_path}")
+        plot_path_histogram = analysis_dir / f"cv_histogram_{seed}.png"
+        if os.path.exists(plot_path) and os.path.exists(plot_path_histogram):
+            print(f"✓ CV over time and histogram plots already exist: {plot_path} and {plot_path_histogram}")
             continue
         
         else:
@@ -687,25 +688,41 @@ def plot_cv_over_time(
                 time = traj_dat[:, 0] / 1000
                 cv = traj_dat[:, 1]
                 
-                # Create plots
-                fig = plt.figure(figsize=(5, 3))
-                ax = fig.add_subplot(111)
-                ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, color=blue)
-                ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
-                ax.set_yticks([-1, -0.5, 0, 0.5, 1])
-                ax.set_xlabel("Time (ns)")
-                ax.set_ylabel("CV Values")
-                ax.set_title(f"CV Evolution - {cfg.method} {seed}")
-                ax.grid(True, alpha=0.3)
-                plt.tight_layout()
+                # Plot - CV over time
+                if not os.path.exists(plot_path):
+                    fig = plt.figure(figsize=(5, 3))
+                    ax = fig.add_subplot(111)
+                    ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, color=blue)
+                    ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
+                    ax.set_yticks([-1, -0.5, 0, 0.5, 1])
+                    ax.set_xlabel("Time (ns)")
+                    ax.set_ylabel("CV Values")
+                    ax.set_title(f"CV Evolution - {cfg.method} {seed}")
+                    ax.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+                    logger.info(f"CV over time plot saved to {plot_path}")
+                    wandb.log({
+                        f"cv_over_time_{seed}": wandb.Image(str(plot_path))
+                    })
+                    plt.close()
                 
-                # Save plot
-                plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-                logger.info(f"CV over time plot saved to {plot_path}")
-                wandb.log({
-                    f"cv_over_time_{seed}": wandb.Image(str(plot_path))
-                })
-                plt.close()
+                # Plot - CV histogram
+                if not os.path.exists(plot_path_histogram):
+                    fig = plt.figure(figsize=(5, 3))
+                    ax = fig.add_subplot(111)
+                    ax.hist(cv, bins=50, alpha=0.7, color=blue, edgecolor='black', log=True)
+                    ax.set_xlabel("CV Values")
+                    ax.set_ylabel("Frequency")
+                    ax.set_title(f"CV Histogram - {cfg.method} {seed}")
+                    ax.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+                    logger.info(f"CV histogram plot saved to {plot_path}")
+                    wandb.log({
+                        f"cv_histogram_{seed}": wandb.Image(str(plot_path))
+                    })
+                    plt.close()
                 
             except Exception as e:
                 logger.error(f"Error in CV over time analysis: {e}")
@@ -746,7 +763,7 @@ def main(cfg):
         gmx_process_energy(log_dir, analysis_dir, max_seed)
         
         # Run analysis functions
-        logger.info("Running CV over time analysis...")
+        logger.info("Running CV analysis...")
         plot_cv_over_time(cfg, log_dir, max_seed, analysis_dir)
         
         logger.info("Running RMSD analysis...")

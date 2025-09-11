@@ -151,7 +151,7 @@ class OPESSimulationRunner:
         #     nvt_name = "nvt_1"
         # else:
         #     nvt_name = "nvt_0"
-        if self.cfg.molecule in ["1fme", "gtt"]:
+        if self.cfg.molecule in ["cln025", "2jof", "1fme", "gtt"]:
             nvt_name = "md"
         else:
             nvt_name = "nvt_0"

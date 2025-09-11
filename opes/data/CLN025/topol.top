@@ -1,8 +1,8 @@
 ;
-;	File 'CLN025/topol.top' was generated
+;	File 'topol.top' was generated
 ;	By user: unknown (0)
 ;	On host: 69957097b7c9
-;	At date: Mon Sep  8 14:26:46 2025
+;	At date: Thu Sep 11 02:17:05 2025
 ;
 ;	This is a standalone topology file
 ;
@@ -11,9 +11,9 @@
 ;	
 ;	Executable:   /gromacs/AVX2_256_ts/bin/gmx
 ;	Data prefix:  /gromacs/AVX2_256_ts
-;	Working dir:  /bioemu/opes/data
+;	Working dir:  /bioemu/opes/data/CLN025
 ;	Command line:
-;	  gmx pdb2gmx -f CLN025/folded.pdb -o CLN025/folded.gro -p CLN025/topol.top -ff charmm27 -water tip3p --ignh
+;	  gmx pdb2gmx -f folded.pdb -o folded.gro -p topol.top -ff charmm27 -water tip3p --ignh
 ;	Force field was read from the standard GROMACS share directory.
 ;
 
@@ -1620,8 +1620,10 @@ Protein_chain_A     3
 
 [ system ]
 ; Name
-Protein
+Protein in water
 
 [ molecules ]
 ; Compound        #mols
 Protein_chain_A     1
+SOL         3332
+NA               2

@@ -534,9 +534,11 @@ def save_plot_dual_format(
         bool: True if files were saved, False if they already existed
     """
     os.makedirs(img_dir, exist_ok=True)
+    os.makedirs(os.path.join(img_dir, "pdf"), exist_ok=True)
     
     png_path = os.path.join(img_dir, f"{filename}.png")
-    pdf_path = os.path.join(img_dir, f"{filename}.pdf")
+    pdf_path = os.path.join(img_dir, f"pdf/{filename}.pdf")
+    
     
     # Check if both files already exist
     if os.path.exists(png_path) and os.path.exists(pdf_path):
