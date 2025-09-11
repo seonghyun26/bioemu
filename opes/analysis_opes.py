@@ -219,6 +219,9 @@ def plot_pmf(
     plot_path = analysis_dir / "pmf.png"
     if os.path.exists(plot_path):
         print(f"✓ PMF plot already exists: {plot_path}")
+        wandb.log({
+            "pmf": wandb.Image(str(plot_path)),
+        })
         return
     
     else:
@@ -342,6 +345,9 @@ def plot_free_energy_curve(
     plot_path = analysis_dir / "free_energy_curve.png"
     if os.path.exists(plot_path):
         print(f"✓ Free energy curve plot already exists: {plot_path}")
+        wandb.log({
+            "free_energy_curve": wandb.Image(str(plot_path)),
+        })
         return
     
     else:
@@ -500,21 +506,24 @@ def plot_rmsd_analysis(
     """Calculate and plot alpha carbon RMSD to reference PDB"""
     logger.info("Calculating alpha carbon RMSD to reference structure...")
     
-    try:
-        ref_pdb_path = f"./data/{cfg.molecule.upper()}/folded.pdb"
-        ref_traj = md.load_pdb(ref_pdb_path)
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Computing RMSD"
+    )
+    for seed in pbar:
+        plot_path = analysis_dir / f"rmsd_analysis_{seed}.png"
+        if os.path.exists(plot_path):
+            print(f"✓ RMSD analysis plot already exists: {plot_path}")
+            wandb.log({
+                "rmsd_analysis": wandb.Image(str(plot_path)),
+            })
+            continue
         
-        pbar = tqdm(
-            range(max_seed + 1),
-            desc="Computing RMSD"
-        )
-        for seed in pbar:
-            plot_path = analysis_dir / f"rmsd_analysis_{seed}.png"
-            if os.path.exists(plot_path):
-                print(f"✓ RMSD analysis plot already exists: {plot_path}")
-                continue
-        
-            else:
+        else:
+            try:
+                ref_pdb_path = f"./data/{cfg.molecule.upper()}/folded.pdb"
+                ref_traj = md.load_pdb(ref_pdb_path)
+            
                 # Load trajectory and compute RMSD
                 traj_file = log_dir / "analysis" / f"{seed}_tc.xtc"
                 try:
@@ -565,9 +574,9 @@ def plot_rmsd_analysis(
                 
                 plt.close()
         
-    except Exception as e:
-        logger.error(f"Error in RMSD analysis: {e}")
-        raise
+            except Exception as e:
+                logger.error(f"Error in RMSD analysis: {e}")
+                raise
 
 
 def plot_tica_scatter(
@@ -579,37 +588,37 @@ def plot_tica_scatter(
     """Plot TICA scatter with simulation trajectory overlay"""
     logger.info("Creating TICA scatter plot...")
     
-    try:
-        # Load TICA model
-        if cfg.molecule == "cln025":
-            tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_switch_lag10.pkl"
-        else:
-            tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_lag10.pkl"
-        with open(tica_model_path, 'rb') as f:
-            tica_model = pickle.load(f)
-        
-        # Load coordinates for background
-        tica_coord_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_coord_lag10.npy"
-        if Path(tica_coord_path).exists():
-            tica_coord_full = np.load(tica_coord_path)
-        else:
-            cad_full_path = f"./data/{cfg.molecule.upper()}/cad-switch.pt" if cfg.molecule == "cln025" else f"./data/{cfg.molecule.upper()}/cad.pt"
-            cad_full = torch.load(cad_full_path).numpy()
-            tica_coord_full = tica_model.transform(cad_full)
+    # Process simulation trajectory
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Computing TICA scatter"
+    )
+    for seed in pbar:
+        plot_path = analysis_dir / f"tica_scatter_{seed}.png"
+        if os.path.exists(plot_path):
+            print(f"✓ TICA scatter plot already exists: {plot_path}")
+            wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
+            continue
     
-        # Process simulation trajectory
-        pbar = tqdm(
-            range(max_seed + 1),
-            desc="Computing TICA scatter"
-        )
-        for seed in pbar:
-            # Check if plot already exists
-            plot_path = analysis_dir / f"tica_scatter_{seed}.png"
-            if os.path.exists(plot_path):
-                print(f"✓ TICA scatter plot already exists: {plot_path}")
-                continue
+        else:
+            try:
+                # Load TICA model
+                if cfg.molecule == "cln025":
+                    tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_switch_lag10.pkl"
+                else:
+                    tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_lag10.pkl"
+                with open(tica_model_path, 'rb') as f:
+                    tica_model = pickle.load(f)
+                
+                # Load coordinates for background
+                tica_coord_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_coord_lag10.npy"
+                if Path(tica_coord_path).exists():
+                    tica_coord_full = np.load(tica_coord_path)
+                else:
+                    cad_full_path = f"./data/{cfg.molecule.upper()}/cad-switch.pt" if cfg.molecule == "cln025" else f"./data/{cfg.molecule.upper()}/cad.pt"
+                    cad_full = torch.load(cad_full_path).numpy()
+                    tica_coord_full = tica_model.transform(cad_full)
             
-            else:
                 # Load trajectory data
                 traj_file = analysis_dir / f"{seed}_tc.xtc"
                 if not traj_file.exists()   :
@@ -655,9 +664,9 @@ def plot_tica_scatter(
                 wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
                 plt.close()
     
-    except Exception as e:
-        logger.error(f"Error in TICA scatter analysis: {e}")
-        raise    
+            except Exception as e:
+                logger.error(f"Error in TICA scatter analysis: {e}")
+                raise    
 
 
 def plot_cv_over_time(
