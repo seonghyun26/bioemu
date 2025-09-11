@@ -2,6 +2,7 @@ cd ../
 
 method="tica"
 ntomp=${2:-"1"}
+start_gpu=${3:-"0"}
 date="debug"
 echo $date
 
@@ -9,7 +10,7 @@ python main.py \
     --config-name debug \
     date=$date \
     +tags=['debug'] \
-    start_gpu=0 \
+    start_gpu=$start_gpu \
     opes.ntomp=$ntomp
 
 wait 

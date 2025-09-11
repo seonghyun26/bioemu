@@ -153,3 +153,5 @@ cython_debug/
 *HILLS*
 *!model/_baseline_/*
 */test/*
+
+opes/data/charm27.ff
