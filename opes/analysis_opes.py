@@ -216,7 +216,7 @@ def plot_pmf(
     reference_cvs: np.ndarray,
 ):
     equil_temp = 340
-    plot_path = analysis_dir / "pmf.png"
+    plot_path = analysis_dir / "pmf.pdf"
     if os.path.exists(plot_path):
         print(f"✓ PMF plot already exists: {plot_path}")
         wandb.log({
@@ -343,7 +343,7 @@ def plot_free_energy_curve(
     analysis_dir: Path,
     reference_cvs: np.ndarray,
 ):
-    plot_path = analysis_dir / "free_energy_curve.png"
+    plot_path = analysis_dir / "free_energy_curve.pdf"
     if os.path.exists(plot_path):
         print(f"✓ Free energy curve plot already exists: {plot_path}")
         wandb.log({
@@ -514,7 +514,7 @@ def plot_rmsd_analysis(
         desc="Computing RMSD"
     )
     for seed in pbar:
-        plot_path = analysis_dir / f"rmsd_analysis_{seed}.png"
+        plot_path = analysis_dir / f"rmsd_analysis_{seed}.pdf"
         if os.path.exists(plot_path):
             print(f"✓ RMSD analysis plot already exists: {plot_path}")
             wandb.log({
@@ -597,7 +597,7 @@ def plot_tica_scatter(
         desc="Computing TICA scatter"
     )
     for seed in pbar:
-        plot_path = analysis_dir / f"tica_scatter_{seed}.png"
+        plot_path = analysis_dir / f"tica_scatter_{seed}.pdf"
         if os.path.exists(plot_path):
             print(f"✓ TICA scatter plot already exists: {plot_path}")
             wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
@@ -686,8 +686,8 @@ def plot_cv_over_time(
         desc="Computing CV over time"
     )
     for seed in pbar:
-        plot_path = analysis_dir / f"cv_over_time_{seed}.png"
-        plot_path_histogram = analysis_dir / f"cv_histogram_{seed}.png"
+        plot_path = analysis_dir / f"cv_over_time_{seed}.pdf"
+        plot_path_histogram = analysis_dir / f"cv_histogram_{seed}.pdf"
         if os.path.exists(plot_path) and os.path.exists(plot_path_histogram):
             print(f"✓ CV over time and histogram plots already exist: {plot_path} and {plot_path_histogram}")
             continue
