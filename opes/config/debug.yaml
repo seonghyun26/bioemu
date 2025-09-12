@@ -1,7 +1,7 @@
-molecule: cln025
+molecule: gtt
 method: tica
 ckpt_dir: _baseline_
-ckpt_path: tica-CLN025
+ckpt_path: tica-GTT
 date: debug
 tags: ['opes']
 start_gpu: 0
