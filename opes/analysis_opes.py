@@ -317,18 +317,19 @@ def plot_pmf(
             )
         ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
         ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
-        plt.xticks(fontsize=FONTSIZE_SMALL)
-        plt.yticks(fontsize=FONTSIZE_SMALL)
-        plt.xlabel("CV", fontsize=FONTSIZE_SMALL)
-        plt.ylabel("PMF [kJ/mol]", fontsize=FONTSIZE_SMALL)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.tick_params(axis='both', labelsize=FONTSIZE_SMALL)
+        ax.set_xlabel("CV", fontsize=FONTSIZE_SMALL)
+        ax.set_ylabel("PMF [kJ/mol]", fontsize=FONTSIZE_SMALL)
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(plot_path, dpi=300, bbox_inches="tight")
         logger.info(f"PMF plot saved to {plot_path}")
         wandb.log({
             "pmf": wandb.Image(str(plot_path)),
-            "pmf_mae": pmf_mae,
-            "pmf_std": std_pmf[~np.isnan(std_pmf)].mean()
+            "pmf_mae": round(pmf_mae, 2),
+            "pmf_std": round(std_pmf[~np.isnan(std_pmf)].mean(), 2)
         })
         plt.close()
         
@@ -471,6 +472,8 @@ def plot_free_energy_curve(
         ax.set_xlim(0.0, time_axis[-1])
         if cfg.molecule == "cln025":
             ax.set_ylim(-20, 30)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
         plt.xticks(fontsize=FONTSIZE_SMALL)
         plt.yticks(fontsize=FONTSIZE_SMALL)
         plt.xlabel('Time [ns]', fontsize=FONTSIZE_SMALL)
@@ -485,10 +488,10 @@ def plot_free_energy_curve(
         logger.info(f"Free energy curve saved to {plot_path}")
         log_info = {
             "free_energy_curve": wandb.Image(str(plot_path)),
-            "free_energy_difference": mean_delta_fs[-1],
-            "free_energy_difference_std": std_delta_fs[-1],
-            "free_energy_difference_reference": reference_Delta_F,
-            "free_energy_difference_mae": np.abs(mean_delta_fs[-1] - reference_Delta_F)
+            "free_energy_difference": round(mean_delta_fs[-1], 2),
+            "free_energy_difference_std": round(std_delta_fs[-1], 2),
+            "free_energy_difference_reference": round(reference_Delta_F, 2),
+            "free_energy_difference_mae": round(np.abs(mean_delta_fs[-1] - reference_Delta_F), 2)
         }
         wandb.log(log_info)
         logger.info(pformat(log_info, indent=4, width=120))
@@ -568,8 +571,8 @@ def plot_rmsd_analysis(
                 logger.info(f"RMSD analysis saved to {plot_path}")
                 wandb.log({
                     "rmsd_analysis": wandb.Image(str(plot_path)),
-                    "max_rmsd": float(np.max(rmsd_values)),
-                    "min_rmsd": float(np.min(rmsd_values))
+                    "max_rmsd": round(float(np.max(rmsd_values)), 2),
+                    "min_rmsd": round(float(np.min(rmsd_values)), 2)
                 })
                 
                 plt.close()

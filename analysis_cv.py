@@ -13,6 +13,7 @@ import os
 import argparse
 import pandas as pd
 import torch.nn.functional as F
+import matplotlib as mpl
 
 
 from matplotlib.colors import LogNorm
@@ -20,7 +21,6 @@ from tqdm import tqdm
 from itertools import combinations
 from scipy.stats import pearsonr, spearmanr
 from torch.utils.data import DataLoader, TensorDataset
-
 
 from mlcolvar.cvs import BaseCV
 from mlcolvar.core import FeedForward, Normalization
@@ -61,6 +61,14 @@ COLORS = ['blue', 'red', 'green', 'orange', 'purple', 'cyan', 'brown', 'magenta'
 SQUARE_FIGSIZE = (4, 4)
 RECTANGLE_FIGSIZE = (5, 4)
 BIG_RECTANGLE_FIGSIZE = (12, 6)
+FONTSIZE = 20
+FONTSIZE_SMALL = 16
+LINEWIDTH = 1.5
+mpl.rcParams['axes.linewidth'] = LINEWIDTH  # default is 0.8
+mpl.rcParams['xtick.major.width'] = LINEWIDTH
+mpl.rcParams['ytick.major.width'] = LINEWIDTH
+mpl.rcParams['xtick.minor.width'] = LINEWIDTH
+mpl.rcParams['ytick.minor.width'] = LINEWIDTH
 
 # Load components
 
@@ -210,8 +218,6 @@ def load_reference_structure(
 
 
 
-# Compute values and helper functions``
-
 def compute_cv_values(
     mlcv_model,
     cad_torch_path,
@@ -299,69 +305,62 @@ def compute_cv_values(
         
     return cv
 
-def foldedness_by_hbond(
-    traj: md.Trajectory,
+
+def foldedness_by_hbond_distance(
+    traj,
     distance_cutoff: float = 0.35,
-    bond_number_cutoff: int = 3,
+    bond_number_cutoff: int = 3
 ):
     """
-    Generate binary labels for folded/unfolded states based on hydrogen bonds.
-    Only works for CLN025 molecule.
+    Optimized distance-only version of hydrogen bond labeling.
+    
+    Much faster than the angle-based version when angles are not needed.
+    
+    Args:
+        traj (mdtraj): mdtraj trajectory object
+        distance_cutoff (float): donor-acceptor distance cutoff in nm (default 0.35 nm = 3.5 angstrom)
+        bond_number_cutoff (int): minimum number of bonds to be considered as folded (default 3)
+
+    Returns:
+        labels (np.array): binary array (1: folded, 0: unfolded)
+        bond_sum (np.array): number of hydrogen bonds per frame
     """
-    # TYR1N-YR10OT1
-    donor_idx = traj.topology.select('residue 1 and name N')[0]
-    acceptor_idx = traj.topology.select('residue 10 and name O')[0]
-    distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-    label_TYR1N_TYR10OT1 = ((distance[:,0] < distance_cutoff)).astype(int)
-
-    # TYR1N-YR10OT2
-    donor_idx = traj.topology.select('residue 1 and name N')[0]
-    acceptor_idx = traj.topology.select('residue 10 and name OXT')[0]
-    distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-    label_TYR1N_TYR10OT2 = ((distance[:,0] < distance_cutoff)).astype(int)
-
-    # ASP3N-TYR8O
-    donor_idx = traj.topology.select('residue 3 and name N')[0]
-    acceptor_idx = traj.topology.select('residue 8 and name O')[0]
-    distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-    label_ASP3N_TYR8O = ((distance[:,0] < distance_cutoff)).astype(int)
-
-    # THR6OG1-ASP3O
-    donor_idx = traj.topology.select('residue 6 and name OG1')[0]
-    acceptor_idx = traj.topology.select('residue 3 and name O')[0]
-    distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-    label_THR6OG1_ASP3O = ((distance[:,0] < distance_cutoff)).astype(int)
-
-    # THR6N-ASP3OD1
-    donor_idx = traj.topology.select('residue 6 and name N')[0]
-    acceptor_idx = traj.topology.select('residue 3 and name OD1')[0]
-    distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-    label_THR6N_ASP3OD1 = ((distance[:,0] < distance_cutoff)).astype(int)
-
-    # THR6N-ASP3OD2
-    donor_idx = traj.topology.select('residue 6 and name N')[0]
-    acceptor_idx = traj.topology.select('residue 3 and name OD2')[0]
-    distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-    label_THR6N_ASP3OD2 = ((distance[:,0] < distance_cutoff)).astype(int)
-
-    # GLY7N-ASP3O
-    donor_idx = traj.topology.select('residue 7 and name N')[0]
-    acceptor_idx = traj.topology.select('residue 3 and name O')[0]
-    distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-    label_GLY7N_ASP3O = ((distance[:,0] < distance_cutoff)).astype(int)
-
-    # TYR10N-TYR1O
-    donor_idx = traj.topology.select('residue 10 and name N')[0]
-    acceptor_idx = traj.topology.select('residue 1 and name O')[0]
-    distance = md.compute_distances(traj, [[donor_idx, acceptor_idx]])
-    label_TYR10N_TYR1O = ((distance[:,0] < distance_cutoff)).astype(int)
-
-    # Sum all bonds
-    bond_sum = (label_TYR1N_TYR10OT1 + label_TYR1N_TYR10OT2 + label_ASP3N_TYR8O + 
-                label_THR6OG1_ASP3O + label_THR6N_ASP3OD1 + label_THR6N_ASP3OD2 + 
-                label_GLY7N_ASP3O + label_TYR10N_TYR1O)
+    
+    # Pre-compute all atom indices
+    atom_indices = {
+        'TYR1_N': traj.topology.select('residue 1 and name N')[0],
+        'TYR1_O': traj.topology.select('residue 1 and name O')[0],
+        'ASP3_N': traj.topology.select('residue 3 and name N')[0],
+        'ASP3_O': traj.topology.select('residue 3 and name O')[0],
+        'ASP3_OD1': traj.topology.select('residue 3 and name OD1')[0],
+        'ASP3_OD2': traj.topology.select('residue 3 and name OD2')[0],
+        'THR6_N': traj.topology.select('residue 6 and name N')[0],
+        'THR6_OG1': traj.topology.select('residue 6 and name OG1')[0],
+        'GLY7_N': traj.topology.select('residue 7 and name N')[0],
+        'TYR8_O': traj.topology.select('residue 8 and name O')[0],
+        'TYR10_N': traj.topology.select('residue 10 and name N')[0],
+        'TYR10_OT1': traj.topology.select('residue 10 and name O')[0],
+        'TYR10_OXT': traj.topology.select('residue 10 and name OXT')[0],
+    }
+    
+    # Define all bond pairs
+    distance_pairs = [
+        [atom_indices['TYR1_N'], atom_indices['TYR10_OT1']],      # TYR1N-TYR10OT1
+        [atom_indices['TYR1_N'], atom_indices['TYR10_OXT']],    # TYR1N-TYR10OT2  
+        [atom_indices['ASP3_N'], atom_indices['TYR8_O']],       # ASP3N-TYR8O
+        [atom_indices['THR6_OG1'], atom_indices['ASP3_O']],     # THR6OG1-ASP3O
+        [atom_indices['THR6_N'], atom_indices['ASP3_OD1']],     # THR6N-ASP3OD1
+        [atom_indices['THR6_N'], atom_indices['ASP3_OD2']],     # THR6N-ASP3OD2
+        [atom_indices['GLY7_N'], atom_indices['ASP3_O']],       # GLY7N-ASP3O
+        [atom_indices['TYR10_N'], atom_indices['TYR1_O']],      # TYR10N-TYR1O
+    ]
+    
+    # Batch compute all distances at once
+    all_distances = md.compute_distances(traj, distance_pairs)
+    bond_labels = (all_distances < distance_cutoff).astype(int)
+    bond_sum = np.sum(bond_labels, axis=1)
     labels = bond_sum >= bond_number_cutoff
-
+    
     return labels, bond_sum
 
 def get_dssp_simplified_mapping():
@@ -484,7 +483,79 @@ def check_image_exists(
     filename,
 ):
     """Check if image file already exists."""
-    return os.path.exists(os.path.join(img_dir, f"{filename}.png"))
+    png_path = os.path.join(img_dir, f"{filename}.png")
+    pdf_path = os.path.join(img_dir, f"pdf/{filename}.pdf")
+    return os.path.exists(png_path) and os.path.exists(pdf_path)
+
+def format_plot_axes(
+    ax,
+    fig=None,
+    hide_ticks=False,
+    hide_x_ticks=False,
+    hide_y_ticks=False,
+    show_grid=True,
+    grid_alpha=0.3,
+    set_axis_below=True,
+    align_ylabels=False,
+    model_type=None,
+    show_y_labels=True,
+    fontsize=FONTSIZE_SMALL,
+    linewidth=LINEWIDTH,
+):
+    """
+    Apply consistent formatting to plot axes.
+    
+    Args:
+        ax: matplotlib axes object
+        fig: matplotlib figure object (required for align_ylabels)
+        hide_ticks: Hide both x and y ticks
+        hide_x_ticks: Hide only x ticks
+        hide_y_ticks: Hide only y ticks
+        show_grid: Show grid lines
+        grid_alpha: Grid transparency
+        set_axis_below: Set grid behind plot elements
+        align_ylabels: Align y-axis labels (requires fig)
+        fontsize: Font size for tick labels
+        model_type: Model type for conditional formatting
+        show_y_labels: Whether to show y-axis labels (used for conditional formatting)
+    """
+    # Hide spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    # ax.spines['left'].set_linewidth(LINEWIDTH)
+    # ax.spines['bottom'].set_linewidth(LINEWIDTH)
+    
+    # Handle tick visibility
+    if hide_ticks:
+        ax.set_xticks([])
+        ax.set_yticks([])
+    else:
+        if hide_x_ticks:
+            ax.set_xticks([])
+        if hide_y_ticks:
+            ax.set_yticks([])
+    
+    # Grid formatting
+    if show_grid:
+        ax.grid(True, alpha=grid_alpha, linewidth=linewidth)
+        if set_axis_below:
+            ax.set_axisbelow(True)
+    
+    # Tick parameters
+    if not hide_ticks and not (hide_x_ticks and hide_y_ticks):
+        if model_type == "tda" and show_y_labels:
+            # Show both x and y tick labels for TDA model
+            ax.tick_params(axis='both', labelsize=fontsize)
+        else:
+            # Hide y-axis labels for non-TDA models unless explicitly requested
+            if show_y_labels:
+                ax.tick_params(axis='both', labelsize=fontsize)
+            else:
+                ax.tick_params(axis='both', labelsize=fontsize, labelleft=False)
+    
+    # Align y-labels if requested and figure is provided
+    if align_ylabels and fig is not None:
+        fig.align_ylabels(ax)
 
 def format_violin_parts(
     violin_parts
@@ -541,7 +612,7 @@ def save_plot_dual_format(
     
     
     # Check if both files already exist
-    if os.path.exists(png_path) and os.path.exists(pdf_path):
+    if check_image_exists(img_dir, filename):
         print(f"> Skipping {filename} - both PNG and PDF already exist")
         return False
     
@@ -551,8 +622,6 @@ def save_plot_dual_format(
     try:
         # Save as PNG
         if not os.path.exists(png_path):
-            if rasterized:
-                rasterize_plot_elements()
             plt.savefig(
                 png_path,
                 dpi=dpi,
@@ -563,6 +632,8 @@ def save_plot_dual_format(
         
         # Save as PDF
         if not os.path.exists(pdf_path):
+            # if rasterized:
+            #     rasterize_plot_elements()
             plt.savefig(
                 pdf_path,
                 dpi=dpi,
@@ -587,6 +658,7 @@ def plot_tica_cv_analysis(
     molecule,
     img_dir,
     date=None,
+    plot_3d=False,
 ):
     x = tica_data[:, 0]
     y = tica_data[:, 1]
@@ -595,7 +667,7 @@ def plot_tica_cv_analysis(
     
     for cv_dim in range(MLCV_DIM):
         # 2D TICA hexbin plot
-        filename = f"tica-cv{cv_dim}_{model_type}"
+        filename = f"tica-cv{cv_dim}-{model_type}"
         if date:
             filename += f"_{date}"
         
@@ -604,43 +676,62 @@ def plot_tica_cv_analysis(
             continue
         print(f"> Plotting TICA-CV analysis for {model_type} {molecule}")
         
-        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
+        fig = plt.figure(figsize=SQUARE_FIGSIZE)
         ax = fig.add_subplot(111)
         hb = ax.hexbin(
             x, y, C=cv[:, cv_dim],
             gridsize=200,
             reduce_C_function=np.mean,
             cmap='viridis',
+            zorder=2,
+            rasterized=True,
         )
-        plt.colorbar(hb)
-        plt.xlabel("TIC 1")
-        plt.ylabel("TIC 2")
-        plt.title(f"CV {cv_dim} - {model_type.upper()}")
+        # plt.colorbar(hb)
+        ax.set_xlabel("TIC 1", fontsize=FONTSIZE_SMALL)
+        if model_type == "tda":
+            ax.set_ylabel("TIC 2", fontsize=FONTSIZE_SMALL)
+        if molecule == "CLN025":
+            ax.set_xticks([-2, -1, 0])
+            if model_type == "tda":
+                ax.set_yticks([-6, -4, -2, 0, 2])
+        
+        # Apply consistent formatting
+        format_plot_axes(
+            ax, fig=fig, 
+            model_type=model_type, 
+            show_y_labels=(model_type == "tda"),
+            align_ylabels=True
+        )
         save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
         plt.close()
 
         # 3D scatter plot
-        filename_3d = f"tica3d-cv{cv_dim}_{model_type}"
-        if date:
-            filename_3d += f"_{date}"
+        if plot_3d:
+            filename_3d = f"tica3d-cv{cv_dim}-{model_type}"
+            if date:
+                filename_3d += f"_{date}"
+                
+            if check_image_exists(img_dir, filename_3d):
+                print(f"> Skipping {filename_3d}.png - already exists")
+                continue
+                
+            z = cv[:, cv_dim]
+            fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
+            ax = fig.add_subplot(111, projection='3d')
+            sc = ax.scatter(x, y, z, c=z, cmap='viridis', s=2, alpha=0.6)  # Smaller dots (s=2) and more transparent
+            ax.set_xlabel('TIC 1')
+            ax.set_ylabel('TIC 2')
+            ax.set_zlabel(f'CV {cv_dim}')
+            # ax.set_title(f'3D Scatter: CV {cv_dim} - {model_type.upper()}')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_zticks([-1.0, 0.0, 1.0])
+            ax.tick_params(axis='both', labelsize=FONTSIZE_SMALL)
+            ax.view_init(azim=-85)
             
-        if check_image_exists(img_dir, filename_3d):
-            print(f"> Skipping {filename_3d}.png - already exists")
-            continue
-            
-        z = cv[:, cv_dim]
-        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
-        ax = fig.add_subplot(111, projection='3d')
-        sc = ax.scatter(x, y, z, c=z, cmap='viridis', s=2, alpha=0.6)  # Smaller dots (s=2) and more transparent
-        ax.set_xlabel('TIC 1')
-        ax.set_ylabel('TIC 2')
-        ax.set_zlabel(f'CV {cv_dim}')
-        ax.set_title(f'3D Scatter: CV {cv_dim} - {model_type.upper()}')
-        ax.set_zticks([-1.0, -0.5, 0.0, 0.5, 1.0])
-        ax.view_init(azim=-85)
-        
-        save_plot_dual_format(img_dir, filename_3d, dpi=300, bbox_inches='tight')
-        plt.close()
+            plt.tight_layout()
+            save_plot_dual_format(img_dir, filename_3d, dpi=300, bbox_inches='tight')
+            plt.close()
 
 def plot_cv_tica_analysis(
     cv,
@@ -658,14 +749,14 @@ def plot_cv_tica_analysis(
     os.makedirs(img_dir, exist_ok=True)
     
     # Plot for TICA-1 as colors
-    filename_tica1 = f"cv2d-tica1_{model_type}"
+    filename_tica1 = f"cv2d-tica1-{model_type}"
     if date:
         filename_tica1 += f"_{date}"
     
     if not check_image_exists(img_dir, filename_tica1):
         print(f"> Plotting CV 2D histogram colored by TICA-1 for {model_type} {molecule}")
         
-        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
+        fig = plt.figure(figsize=SQUARE_FIGSIZE)
         ax = fig.add_subplot(111)
         hb = ax.hexbin(
             cv[:, 0], cv[:, 1], C=tica_data[:, 0],
@@ -673,24 +764,31 @@ def plot_cv_tica_analysis(
             reduce_C_function=np.mean,
             cmap='viridis',
         )
-        plt.colorbar(hb, label='TICA-1')
-        plt.xlabel("CV 0")
-        plt.ylabel("CV 1")
-        plt.title(f"CV 2D Histogram (colored by TICA-1) - {model_type.upper()}")
+        # Apply consistent formatting
+        format_plot_axes(
+            ax, fig=fig, 
+            hide_ticks=True,
+            model_type=model_type, 
+            show_y_labels=False
+        )
+        # plt.colorbar(hb, label='TICA-1')
+        # plt.xlabel("CV 0")
+        # plt.ylabel("CV 1")
+        # plt.title(f"CV 2D Histogram (colored by TICA-1) - {model_type.upper()}")
         save_plot_dual_format(img_dir, filename_tica1, dpi=300, bbox_inches='tight')
         plt.close()
     else:
         print(f"> Skipping {filename_tica1}.png - already exists")
     
     # Plot for TICA-2 as colors
-    filename_tica2 = f"cv2d-tica2_{model_type}"
+    filename_tica2 = f"cv2d-tica2-{model_type}"
     if date:
         filename_tica2 += f"_{date}"
     
     if not check_image_exists(img_dir, filename_tica2):
         print(f"> Plotting CV 2D histogram colored by TICA-2 for {model_type} {molecule}")
         
-        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
+        fig = plt.figure(figsize=SQUARE_FIGSIZE)
         ax = fig.add_subplot(111)
         hb = ax.hexbin(
             cv[:, 0], cv[:, 1], C=tica_data[:, 1],
@@ -698,10 +796,17 @@ def plot_cv_tica_analysis(
             reduce_C_function=np.mean,
             cmap='viridis',
         )
-        plt.colorbar(hb, label='TICA-2')
-        plt.xlabel("CV 0")
-        plt.ylabel("CV 1")
-        plt.title(f"CV 2D Histogram (colored by TICA-2) - {model_type.upper()}")
+        # Apply consistent formatting
+        format_plot_axes(
+            ax, fig=fig, 
+            hide_ticks=True,
+            model_type=model_type, 
+            show_y_labels=False
+        )
+        # plt.colorbar(hb, label='TICA-2')
+        # plt.xlabel("CV 0")
+        # plt.ylabel("CV 1")
+        # plt.title(f"CV 2D Histogram (colored by TICA-2) - {model_type.upper()}")
         save_plot_dual_format(img_dir, filename_tica2, dpi=300, bbox_inches='tight')
         plt.close()
     else:
@@ -719,7 +824,7 @@ def plot_cv_histogram(
     os.makedirs(img_dir, exist_ok=True)
     
     for cv_dim in range(MLCV_DIM):
-        filename = f"cv{cv_dim}_histogram_{model_type}"
+        filename = f"cv{cv_dim}_histogram-{model_type}"
         if date:
             filename += f"_{date}"
             
@@ -730,8 +835,8 @@ def plot_cv_histogram(
 
         cv_dim_val = cv[:, cv_dim]
         
-        plt.figure(figsize=RECTANGLE_FIGSIZE)
-        ax = plt.subplot(111)
+        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
+        ax = fig.add_subplot(111)
         counts, bins, patches = ax.hist(
             cv_dim_val,
             bins=n_bins,
@@ -740,23 +845,30 @@ def plot_cv_histogram(
             edgecolor='black',
             linewidth=0.5,
             log=True,
+            rasterized=True,
         )
 
         # Add statistics
         mean_val = np.mean(cv_dim_val)
         std_val = np.std(cv_dim_val)
-        
         stats_text = f'Mean: {mean_val:.3f}\nStd: {std_val:.3f}'
         ax.text(0.75, 0.75, stats_text, transform=ax.transAxes, 
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
                 verticalalignment='top', fontsize=10)
         ax.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.3f}')
-
-        ax.set_xlabel(f'CV {cv_dim} Values', fontsize=12)
-        ax.set_ylabel('Frequency', fontsize=12)
-        ax.set_title(f'Histogram of CV {cv_dim} Values - {model_type.upper()}', fontsize=14)
-        ax.grid(True, alpha=0.3)
-
+        
+        # Apply consistent formatting
+        format_plot_axes(
+            ax, fig=fig, 
+            hide_ticks=True,
+            model_type=model_type, 
+            show_y_labels=False,
+            align_ylabels=True
+        )
+        # ax.set_xlabel(f'CV {cv_dim} Values', fontsize=12)
+        # ax.set_ylabel('Frequency', fontsize=12)
+        # ax.set_title(f'Histogram of CV {cv_dim} Values - {model_type.upper()}', fontsize=14)
+        
         plt.tight_layout()
         save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
         plt.close()
@@ -787,9 +899,16 @@ def plot_bond_analysis(
             continue
         print(f"> Plotting bond number analysis for {model_type} {molecule}")
         
-        dummy_pdb = tica_wrapper.pdb
-        dummy_pdb.xyz = pos_torch.cpu().detach().numpy()
-        label, bond_num = foldedness_by_hbond(dummy_pdb)
+        bond_path = "/home/shpark/prj-mlcv/lib/bioemu/opes/data/CLN025/bond_num.npy"
+        if os.path.exists(bond_path):
+            print(f"> Loaded bond number from {bond_path}")
+            bond_num = np.load(bond_path)
+        else:
+            print(f"> No bond number found at {bond_path}, computing...")
+            dummy_pdb = tica_wrapper.pdb
+            dummy_pdb.xyz = pos_torch.cpu().detach().numpy()
+            label, bond_num = foldedness_by_hbond_distance(dummy_pdb)
+            np.save(bond_path, bond_num)
             
         fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = fig.add_subplot(111)
@@ -800,14 +919,22 @@ def plot_bond_analysis(
             grouped, positions=sorted(np.unique(y)),
             showmeans=True, showmedians=False, showextrema=True,
         )
-        
         format_violin_parts(violin_parts)
 
-        ax.set_xlabel("Bond Number")
-        ax.set_ylabel("CV")
-        ax.set_title(f"CV {cv_dim} vs Bond Number - {model_type.upper()}")
-        ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
+        ax.set_xlabel("Bond Number", fontsize=FONTSIZE_SMALL)
+        ax.set_xticks([0, 1, 2, 3, 4, 5, 6, 7])
+        if model_type == "tda":
+            ax.set_ylabel("CV", fontsize=FONTSIZE_SMALL)
+            ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
         
+        # Apply consistent formatting
+        format_plot_axes(
+            ax, fig=fig, 
+            model_type=model_type, 
+            show_y_labels=(model_type == "tda"),
+            align_ylabels=True
+        )
+        # ax.set_title(f"CV {cv_dim} vs Bond Number - {model_type.upper()}")
         save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
         plt.close()
 
@@ -832,28 +959,50 @@ def plot_committor_analysis(
             print(f"> Skipping {filename}.png - already exists")
             continue
         print(f"> Plotting committor analysis for {model_type} {molecule}")
-        committor_value = committor_model(cad_torch.to(CUDA_DEVICE))
-        committor_value = committor_value.cpu().detach().numpy().flatten()
+        committor_value_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/data/CLN025/committor_value_cv{cv_dim}.npy"
+        if os.path.exists(committor_value_path):
+            print(f"> Loaded committor value from {committor_value_path}")
+            committor_value = np.load(committor_value_path)
+        else:
+            print(f"> No committor value found at {committor_value_path}, computing...")
+            committor_value = committor_model(cad_torch.to(CUDA_DEVICE))
+            committor_value = committor_value.cpu().detach().numpy().flatten()
+            np.save(committor_value_path, committor_value)
             
         # Scatter plot
         fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = fig.add_subplot(111)
-        ax.scatter(committor_value, cv[:, cv_dim], color=blue, s=2)
+        ax.scatter(
+            committor_value, cv[:, cv_dim],
+            color=blue, s=2,
+            zorder=2,
+            rasterized=True,
+        )
         correlation_pearson, p_value_pearson = pearsonr(committor_value, cv[:, cv_dim])
         correlation_spearman, p_value_spearman = spearmanr(committor_value, cv[:, cv_dim])
         correlation_text = f'Pearson r = {correlation_pearson:.4f}\nSpearman ρ = {correlation_spearman:.4f}'
-        ax.text(
-            1.05, 0.5,
-            correlation_text,
-            transform=ax.transAxes, 
-            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
-            verticalalignment='top', fontsize=10
-        )
-        ax.set_xlabel("Committor")
-        ax.set_ylabel(f"CV {cv_dim}")
-        ax.set_title(f"CV {cv_dim} vs Committor - {model_type.upper()}")
-        ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
+        # ax.text(
+        #     1.05, 0.5,
+        #     correlation_text,
+        #     transform=ax.transAxes, 
+        #     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+        #     verticalalignment='top', fontsize=10
+        # )
+        # ax.set_title(f"CV {cv_dim} vs Committor - {model_type.upper()}")
+        ax.set_xticks([0.00, 0.25, 0.50, 0.75, 1.00])
+        ax.set_xlabel("Committor", fontsize=FONTSIZE_SMALL)
+        if model_type == "tda":
+            ax.set_ylabel(f"CV {cv_dim}", fontsize=FONTSIZE_SMALL)
+            ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
         
+        # Apply consistent formatting
+        format_plot_axes(
+            ax, fig=fig, 
+            model_type=model_type, 
+            show_y_labels=(model_type == "tda"),
+            align_ylabels=True
+        )
+
         save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
         plt.close()
 
@@ -888,10 +1037,18 @@ def plot_rmsd_analysis(
         rmsd_unfolded = torch.load(rmsd_unfolded_path).numpy()
         
         # Scatter plot
-        fig = plt.figure(figsize=(6, 4))
+        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
         ax = fig.add_subplot(111)
-        ax.scatter(rmsd, cv[:, cv_dim], color=blue, s=0.5, alpha=0.4, zorder=1)
-        ax.scatter(rmsd_unfolded, cv[:, cv_dim], color=green, s=0.5, alpha=0.4, zorder=1)
+        ax.scatter(
+            rmsd, cv[:, cv_dim],
+            color=blue, s=0.5, alpha=0.4, zorder=1,
+            rasterized=True,
+        )
+        ax.scatter(
+            rmsd_unfolded, cv[:, cv_dim],
+            color=green, s=0.5, alpha=0.4, zorder=1,
+            rasterized=True,
+        )
         
         # Calculate Pearson and Spearman correlations
         correlation_folded_p, p_value_folded_p = pearsonr(rmsd, cv[:, cv_dim])
@@ -906,15 +1063,25 @@ def plot_rmsd_analysis(
             f'Pearson r = {correlation_unfolded_p:.4f}\n'
             f'Spearman ρ = {correlation_unfolded_s:.4f}'
         )
-        ax.text(
-            1.05, 0.5, correlation_text, transform=ax.transAxes, 
-            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
-            verticalalignment='top', fontsize=10
+        # ax.text(
+        #     1.05, 0.5, correlation_text, transform=ax.transAxes, 
+        #     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+        #     verticalalignment='top', fontsize=10
+        # )
+        # ax.set_title(f"CV {cv_dim} vs RMSD to folded state - {model_type.upper()}")
+        ax.set_xticks([0.00, 0.25, 0.50, 0.75, 1.00])
+        ax.set_xlabel(f"RMSD", fontsize=FONTSIZE_SMALL)
+        if model_type == "tda":
+            ax.set_ylabel(f"CV", fontsize=FONTSIZE_SMALL)
+            ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
+        
+        # Apply consistent formatting
+        format_plot_axes(
+            ax, fig=fig, 
+            model_type=model_type, 
+            show_y_labels=(model_type == "tda"),
+            align_ylabels=True
         )
-        ax.set_xlabel(f"RMSD to folded state, {molecule}")
-        ax.set_ylabel(f"CV {cv_dim}")
-        ax.set_title(f"CV {cv_dim} vs RMSD to folded state - {model_type.upper()}")
-        ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
         
         save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
         plt.close()
@@ -1085,8 +1252,13 @@ def plot_dssp_simplified_violin_analysis(
         ax.set_ylabel(f'CV {cv_dim} Values')
         ax.set_title(f'CV {cv_dim} Distribution by DSSP Simplified Secondary Structure - {model_type.upper()}')
         ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
-        ax.grid(True, alpha=0.3)
         
+        # Apply consistent formatting
+        format_plot_axes(
+            ax, fig=fig, 
+            model_type=model_type, 
+            show_y_labels=True
+        )
         plt.tight_layout()
         save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
         plt.close()
@@ -1499,6 +1671,7 @@ def main():
     parser.add_argument('--date', type=str, default=None, help='Date string for MLCV model (only used for mlcv)')
     parser.add_argument('--img_dir', type=str, default='/home/shpark/prj-mlcv/lib/bioemu/img/debug', help='Directory to save images')
     parser.add_argument('--cuda_device', type=int, default=None, help='CUDA device ID to use (e.g., 0, 1). If not specified, auto-detect available device')
+    parser.add_argument('--plot_3d', type=bool, default=False, help='Plot 3D scatter plot')
     # parser.add_argument('--dssp_analysis', type=bool, default=False, help='Perform DSSP analysis')
     args = parser.parse_args()
     
@@ -1550,7 +1723,7 @@ def main():
                 )
                 print(f"CV shape: {cv.shape}")
                 print(f"CV range: {cv.max():.4f} to {cv.min():.4f}")
-                plot_cv_histogram(cv, model_type, molecule, img_dir_mol, args.date)
+                # plot_cv_histogram(cv, model_type, molecule, img_dir_mol, args.date)
                 
                 # Compute TICA coordinates
                 tica_coord_path = f"./opes/data/{molecule.upper()}/tica_lag10_coord.npy"
@@ -1567,7 +1740,7 @@ def main():
                         cad_torch = cad_torch.cpu() if cad_torch.device.type == "cuda" else cad_torch
                         tica_data = tica_wrapper.transform(cad_torch.numpy())
                 print(f"TICA shape: {tica_data.shape}")
-                plot_tica_cv_analysis(cv, tica_data, model_type, molecule, img_dir_mol, args.date)
+                plot_tica_cv_analysis(cv, tica_data, model_type, molecule, img_dir_mol, args.date, args.plot_3d)
                 if cv.shape[1] > 1:
                     plot_cv_tica_analysis(cv, tica_data, model_type, molecule, img_dir_mol, args.date)
                 
@@ -1591,9 +1764,16 @@ def main():
                     plot_committor_analysis(cv, cad_torch, committor_model, model_type, molecule, img_dir_mol, args.date)
                     plot_bond_analysis(cv, pos_torch, tica_wrapper, molecule, model_type, img_dir_mol, args.date)
                     
-                    dummy_pdb = tica_wrapper.pdb
-                    dummy_pdb.xyz = pos_torch.cpu().detach().numpy()
-                    _, bond_num = foldedness_by_hbond(dummy_pdb)
+                    bond_path = "/home/shpark/prj-mlcv/lib/bioemu/opes/data/CLN025/bond_num.npy"
+                    if os.path.exists(bond_path):
+                        print(f"> Loaded bond number from {bond_path}")
+                        bond_num = np.load(bond_path)
+                    else:
+                        print(f"> No bond number found at {bond_path}, computing...")
+                        dummy_pdb = tica_wrapper.pdb
+                        dummy_pdb.xyz = pos_torch.cpu().detach().numpy()
+                        _, bond_num = foldedness_by_hbond_distance(dummy_pdb)
+                        np.save(bond_path, bond_num)
                     committor_value = committor_model(cad_torch.to(CUDA_DEVICE))
                     committor_value = committor_value.cpu().detach().numpy().flatten()
                     analyze_correlations(cv, committor_value, tica_data, bond_num, molecule, model_type)

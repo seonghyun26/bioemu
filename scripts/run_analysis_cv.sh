@@ -61,5 +61,5 @@ echo "Results saved to: $IMG_DIR"
 echo "========================================"
 
 # List generated files
-echo "Generated files:"
-ls -la "$IMG_DIR"/*.png 2>/dev/null || echo "No PNG files found in $IMG_DIR"
+# echo "Generated files:"
+# ls -la "$IMG_DIR"/*.png 2>/dev/null || echo "No PNG files found in $IMG_DIR"
