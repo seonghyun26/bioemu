@@ -10,6 +10,7 @@ import pickle
 import torch
 import lightning
 import os
+import wandb
 import argparse
 import pandas as pd
 import torch.nn.functional as F
@@ -70,7 +71,7 @@ mpl.rcParams['ytick.major.width'] = LINEWIDTH
 mpl.rcParams['xtick.minor.width'] = LINEWIDTH
 mpl.rcParams['ytick.minor.width'] = LINEWIDTH
 
-# Load components
+
 
 class TICA_WRAPPER:
     """TICA wrapper for coordinate transformation."""
@@ -99,6 +100,77 @@ class TICA_WRAPPER:
             self.pdb, scheme="ca", contacts=self.ca_resid_pair, periodic=False
         )
         return ca_pair_distances
+
+
+def format_plot_axes(
+    ax,
+    fig=None,
+    hide_ticks=False,
+    hide_x_ticks=False,
+    hide_y_ticks=False,
+    show_grid=True,
+    grid_alpha=0.3,
+    set_axis_below=True,
+    align_ylabels=False,
+    model_type=None,
+    show_y_labels=True,
+    fontsize=FONTSIZE_SMALL,
+    linewidth=LINEWIDTH,
+):
+    """
+    Apply consistent formatting to plot axes.
+    
+    Args:
+        ax: matplotlib axes object
+        fig: matplotlib figure object (required for align_ylabels)
+        hide_ticks: Hide both x and y ticks
+        hide_x_ticks: Hide only x ticks
+        hide_y_ticks: Hide only y ticks
+        show_grid: Show grid lines
+        grid_alpha: Grid transparency
+        set_axis_below: Set grid behind plot elements
+        align_ylabels: Align y-axis labels (requires fig)
+        fontsize: Font size for tick labels
+        model_type: Model type for conditional formatting
+        show_y_labels: Whether to show y-axis labels (used for conditional formatting)
+    """
+    # Hide spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    # ax.spines['left'].set_linewidth(LINEWIDTH)
+    # ax.spines['bottom'].set_linewidth(LINEWIDTH)
+    
+    # Handle tick visibility
+    if hide_ticks:
+        ax.set_xticks([])
+        ax.set_yticks([])
+    else:
+        if hide_x_ticks:
+            ax.set_xticks([])
+        if hide_y_ticks:
+            ax.set_yticks([])
+    
+    # Grid formatting
+    if show_grid:
+        ax.grid(True, alpha=grid_alpha, linewidth=linewidth)
+        if set_axis_below:
+            ax.set_axisbelow(True)
+    
+    # Tick parameters
+    if not hide_ticks and not (hide_x_ticks and hide_y_ticks):
+        if model_type == "tda" and show_y_labels:
+            # Show both x and y tick labels for TDA model
+            ax.tick_params(axis='both', labelsize=fontsize)
+        else:
+            # Hide y-axis labels for non-TDA models unless explicitly requested
+            if show_y_labels:
+                ax.tick_params(axis='both', labelsize=fontsize)
+            else:
+                ax.tick_params(axis='both', labelsize=fontsize, labelleft=False)
+    
+    # Align y-labels if requested and figure is provided
+    if align_ylabels and fig is not None:
+        fig.align_ylabels(ax)
 
 
 def load_model_and_data(
@@ -487,76 +559,6 @@ def check_image_exists(
     pdf_path = os.path.join(img_dir, f"pdf/{filename}.pdf")
     return os.path.exists(png_path) and os.path.exists(pdf_path)
 
-def format_plot_axes(
-    ax,
-    fig=None,
-    hide_ticks=False,
-    hide_x_ticks=False,
-    hide_y_ticks=False,
-    show_grid=True,
-    grid_alpha=0.3,
-    set_axis_below=True,
-    align_ylabels=False,
-    model_type=None,
-    show_y_labels=True,
-    fontsize=FONTSIZE_SMALL,
-    linewidth=LINEWIDTH,
-):
-    """
-    Apply consistent formatting to plot axes.
-    
-    Args:
-        ax: matplotlib axes object
-        fig: matplotlib figure object (required for align_ylabels)
-        hide_ticks: Hide both x and y ticks
-        hide_x_ticks: Hide only x ticks
-        hide_y_ticks: Hide only y ticks
-        show_grid: Show grid lines
-        grid_alpha: Grid transparency
-        set_axis_below: Set grid behind plot elements
-        align_ylabels: Align y-axis labels (requires fig)
-        fontsize: Font size for tick labels
-        model_type: Model type for conditional formatting
-        show_y_labels: Whether to show y-axis labels (used for conditional formatting)
-    """
-    # Hide spines
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    # ax.spines['left'].set_linewidth(LINEWIDTH)
-    # ax.spines['bottom'].set_linewidth(LINEWIDTH)
-    
-    # Handle tick visibility
-    if hide_ticks:
-        ax.set_xticks([])
-        ax.set_yticks([])
-    else:
-        if hide_x_ticks:
-            ax.set_xticks([])
-        if hide_y_ticks:
-            ax.set_yticks([])
-    
-    # Grid formatting
-    if show_grid:
-        ax.grid(True, alpha=grid_alpha, linewidth=linewidth)
-        if set_axis_below:
-            ax.set_axisbelow(True)
-    
-    # Tick parameters
-    if not hide_ticks and not (hide_x_ticks and hide_y_ticks):
-        if model_type == "tda" and show_y_labels:
-            # Show both x and y tick labels for TDA model
-            ax.tick_params(axis='both', labelsize=fontsize)
-        else:
-            # Hide y-axis labels for non-TDA models unless explicitly requested
-            if show_y_labels:
-                ax.tick_params(axis='both', labelsize=fontsize)
-            else:
-                ax.tick_params(axis='both', labelsize=fontsize, labelleft=False)
-    
-    # Align y-labels if requested and figure is provided
-    if align_ylabels and fig is not None:
-        fig.align_ylabels(ax)
-
 def format_violin_parts(
     violin_parts
 ):
@@ -580,7 +582,6 @@ def format_violin_parts(
     violin_parts['cmeans'].set_linewidth(2)
     violin_parts['cmeans'].set_alpha(0.5)
     # violin_parts['cmedians'].set_linewidth(0)
-
 
 def save_plot_dual_format(
     img_dir,
@@ -629,11 +630,14 @@ def save_plot_dual_format(
                 pad_inches=pad_inches,
             )
             print(f">> Saved {png_path}")
+            wandb.log({
+                f"{filename}.png": wandb.Image(str(png_path))
+            })
         
         # Save as PDF
         if not os.path.exists(pdf_path):
-            # if rasterized:
-            #     rasterize_plot_elements()
+            if rasterized:
+                rasterize_plot_elements()
             plt.savefig(
                 pdf_path,
                 dpi=dpi,
@@ -641,7 +645,7 @@ def save_plot_dual_format(
                 pad_inches=pad_inches,
             )
             print(f">> Saved {pdf_path}")
-        
+
         return True
         
     except Exception as e:
@@ -690,10 +694,10 @@ def plot_tica_cv_analysis(
         ax.set_xlabel("TIC 1", fontsize=FONTSIZE_SMALL)
         if model_type == "tda":
             ax.set_ylabel("TIC 2", fontsize=FONTSIZE_SMALL)
-        if molecule == "CLN025":
-            ax.set_xticks([-2, -1, 0])
-            if model_type == "tda":
-                ax.set_yticks([-6, -4, -2, 0, 2])
+        # if molecule == "CLN025":
+        #     ax.set_xticks([-2, -1, 0])
+        #     if model_type == "tda":
+        #         ax.set_yticks([-6, -4, -2, 0, 2])
         
         # Apply consistent formatting
         format_plot_axes(
@@ -980,7 +984,11 @@ def plot_committor_analysis(
         )
         correlation_pearson, p_value_pearson = pearsonr(committor_value, cv[:, cv_dim])
         correlation_spearman, p_value_spearman = spearmanr(committor_value, cv[:, cv_dim])
-        correlation_text = f'Pearson r = {correlation_pearson:.4f}\nSpearman ρ = {correlation_spearman:.4f}'
+        wandb.log({
+            f"committor/pearson_{cv_dim}": correlation_pearson,
+            f"committor/spearman_{cv_dim}": correlation_spearman,
+        })
+        # correlation_text = f'Pearson r = {correlation_pearson:.4f}\nSpearman ρ = {correlation_spearman:.4f}'
         # ax.text(
         #     1.05, 0.5,
         #     correlation_text,
@@ -1012,6 +1020,7 @@ def plot_rmsd_analysis(
     model_type,
     img_dir,
     date=None,
+    unfolded_flag=False,
 ):
     os.makedirs(img_dir, exist_ok=True)
     MLCV_DIM = cv.shape[1]
@@ -1026,15 +1035,16 @@ def plot_rmsd_analysis(
             continue
         print(f"> Plotting RMSD vs CV analysis for {model_type} {molecule}")
         rmsd_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-rmsd.pt"
-        rmsd_unfolded_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-rmsd_unfolded.pt"
         if not os.path.exists(rmsd_path):
             print(f"RMSD data not found at {rmsd_path}")
             return
-        if not os.path.exists(rmsd_unfolded_path):
-            print(f"RMSD unfolded data not found at {rmsd_unfolded_path}")
-            return
         rmsd = torch.load(rmsd_path).numpy()
-        rmsd_unfolded = torch.load(rmsd_unfolded_path).numpy()
+        if unfolded_flag:
+            rmsd_unfolded_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-rmsd_unfolded.pt"
+            if not os.path.exists(rmsd_unfolded_path):
+                print(f"RMSD unfolded data not found at {rmsd_unfolded_path}")
+                return
+            rmsd_unfolded = torch.load(rmsd_unfolded_path).numpy()
         
         # Scatter plot
         fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
@@ -1044,25 +1054,38 @@ def plot_rmsd_analysis(
             color=blue, s=0.5, alpha=0.4, zorder=1,
             rasterized=True,
         )
-        ax.scatter(
-            rmsd_unfolded, cv[:, cv_dim],
-            color=green, s=0.5, alpha=0.4, zorder=1,
-            rasterized=True,
-        )
+        if unfolded_flag:
+            ax.scatter(
+                rmsd_unfolded, cv[:, cv_dim],
+                color=green, s=0.5, alpha=0.4, zorder=1,
+                rasterized=True,
+            )
         
         # Calculate Pearson and Spearman correlations
         correlation_folded_p, p_value_folded_p = pearsonr(rmsd, cv[:, cv_dim])
-        correlation_unfolded_p, p_value_unfolded_p = pearsonr(rmsd_unfolded, cv[:, cv_dim])
         correlation_folded_s, p_value_folded_s = spearmanr(rmsd, cv[:, cv_dim])
-        correlation_unfolded_s, p_value_unfolded_s = spearmanr(rmsd_unfolded, cv[:, cv_dim])
+        if unfolded_flag:
+            correlation_unfolded_p, p_value_unfolded_p = pearsonr(rmsd_unfolded, cv[:, cv_dim])
+            correlation_unfolded_s, p_value_unfolded_s = spearmanr(rmsd_unfolded, cv[:, cv_dim])
         correlation_text = (
-            f'<Folded>\n'
+            f'<RMSD>\n'
             f'Pearson r = {correlation_folded_p:.4f}\n'
             f'Spearman ρ = {correlation_folded_s:.4f}\n'
-            f'<Unfolded>\n'
-            f'Pearson r = {correlation_unfolded_p:.4f}\n'
-            f'Spearman ρ = {correlation_unfolded_s:.4f}'
         )
+        wandb.log({
+            f"rmsd/folded/pearson_{cv_dim}": correlation_folded_p,
+            f"rmsd/folded/spearman_{cv_dim}": correlation_folded_s,
+        })
+        if unfolded_flag:
+            correlation_text += (
+                f'<Unfolded>\n'
+                f'Pearson r = {correlation_unfolded_p:.4f}\n'
+                f'Spearman ρ = {correlation_unfolded_s:.4f}'
+            )
+            wandb.log({
+                f"rmsd/unfolded/pearson_{cv_dim}": correlation_unfolded_p,
+                f"rmsd/unfolded/spearman_{cv_dim}": correlation_unfolded_s,
+            })
         # ax.text(
         #     1.05, 0.5, correlation_text, transform=ax.transAxes, 
         #     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
@@ -1600,7 +1623,6 @@ def plot_dssp_composition_heatmap(
         cbar = plt.colorbar(im, ax=ax, shrink=0.8)
         cbar.set_label('Proportion of Frames', fontsize=11)
         
-        # Save in both formats with tight layout and reduced spacing
         plt.tight_layout(pad=0.5)
         save_plot_dual_format(img_dir, filename, bbox_inches='tight', pad_inches=0.1)
         plt.close()
@@ -1654,6 +1676,16 @@ def analyze_correlations(
     print(f"Committor vs TICA-2:")
     print(f"  Pearson: r = {corr_tica_y_p:.6f}, p = {p_tica_y_p:.2e}")
     print(f"  Spearman: ρ = {corr_tica_y_s:.6f}, p = {p_tica_y_s:.2e}")
+    wandb.log({
+        f"tica/pearson_r": corr_tica_x_p,
+        f"tica/pearson_p": p_tica_x_p,
+        f"tica/spearman_rho": corr_tica_x_s,
+        f"tica/spearman_p": p_tica_x_s,
+        f"tica/pearson_r_y": corr_tica_y_p,
+        f"tica/pearson_p_y": p_tica_y_p,
+        f"tica/spearman_rho_y": corr_tica_y_s,
+        f"tica/spearman_p_y": p_tica_y_s,
+    })
     
     if bond_num is not None:
         corr_bond_p, p_bond_p = pearsonr(committor_value, bond_num)
@@ -1661,6 +1693,12 @@ def analyze_correlations(
         print(f"Committor vs Bond Number:")
         print(f"  Pearson: r = {corr_bond_p:.6f}, p = {p_bond_p:.2e}")
         print(f"  Spearman: ρ = {corr_bond_s:.6f}, p = {p_bond_s:.2e}")
+        wandb.log({
+            f"bond/pearson_r": corr_bond_p,
+            f"bond/pearson_p": p_bond_p,
+            f"bond/spearman_rho": corr_bond_s,
+            f"bond/spearman_p": p_bond_s,
+        })
 
 
 # MAIN
@@ -1695,6 +1733,11 @@ def main():
                 print(f"\n{'='*60}")
                 print(f"Running analysis for {model_type.upper()} - {molecule}")
                 print(f"{'='*60}")
+                wandb.init(
+                    project="cv-analysis",
+                    name=f"{model_type}-{molecule}",
+                    config=vars(args),
+                )
                 
                 # Load model and data
                 mlcv_model, tica_wrapper, committor_model, pos_path, cad_path, cad_switch_path = load_model_and_data(
@@ -1779,9 +1822,11 @@ def main():
                     analyze_correlations(cv, committor_value, tica_data, bond_num, molecule, model_type)
                 
                 print(f"\nCompleted analysis for {model_type.upper()} - {molecule}. Plots saved to {img_dir_mol}")
-            
+                wandb.finish()
+                
             except Exception as e:
                 print(f"Error during analysis for {model_type.upper()} - {molecule}: {e}")
+                wandb.finish()
                 continue
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import TensorDataset, DataLoader
 
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from matplotlib.colors import LogNorm
 
 from adaptive_sampling.processing_tools import mbar
@@ -33,6 +34,87 @@ np.NaN = np.nan
 blue = (70 / 255, 110 / 255, 250 / 255)
 R = 0.008314462618  # kJ/mol/K
 logger = logging.getLogger(__name__)
+FONTSIZE = 20
+FONTSIZE_SMALL = 16
+LINEWIDTH = 1.5
+mpl.rcParams['axes.linewidth'] = LINEWIDTH  # default is 0.8
+mpl.rcParams['xtick.major.width'] = LINEWIDTH
+mpl.rcParams['ytick.major.width'] = LINEWIDTH
+mpl.rcParams['xtick.minor.width'] = LINEWIDTH
+mpl.rcParams['ytick.minor.width'] = LINEWIDTH
+
+
+# Load components
+def format_plot_axes(
+    ax,
+    fig=None,
+    hide_ticks=False,
+    hide_x_ticks=False,
+    hide_y_ticks=False,
+    show_grid=True,
+    grid_alpha=0.3,
+    set_axis_below=True,
+    align_ylabels=False,
+    model_type=None,
+    show_y_labels=True,
+    fontsize=FONTSIZE_SMALL,
+    linewidth=LINEWIDTH,
+):
+    """
+    Apply consistent formatting to plot axes.
+    
+    Args:
+        ax: matplotlib axes object
+        fig: matplotlib figure object (required for align_ylabels)
+        hide_ticks: Hide both x and y ticks
+        hide_x_ticks: Hide only x ticks
+        hide_y_ticks: Hide only y ticks
+        show_grid: Show grid lines
+        grid_alpha: Grid transparency
+        set_axis_below: Set grid behind plot elements
+        align_ylabels: Align y-axis labels (requires fig)
+        fontsize: Font size for tick labels
+        model_type: Model type for conditional formatting
+        show_y_labels: Whether to show y-axis labels (used for conditional formatting)
+    """
+    # Hide spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(LINEWIDTH)
+    ax.spines['bottom'].set_linewidth(LINEWIDTH)
+    
+    # Handle tick visibility
+    if hide_ticks:
+        ax.set_xticks([])
+        ax.set_yticks([])
+    else:
+        if hide_x_ticks:
+            ax.set_xticks([])
+        if hide_y_ticks:
+            ax.set_yticks([])
+    
+    # Grid formatting
+    if show_grid:
+        ax.grid(True, alpha=grid_alpha, linewidth=linewidth)
+        if set_axis_below:
+            ax.set_axisbelow(True)
+    
+    # Tick parameters
+    if not hide_ticks and not (hide_x_ticks and hide_y_ticks):
+        if model_type == "tda" and show_y_labels:
+            # Show both x and y tick labels for TDA model
+            ax.tick_params(axis='both', labelsize=fontsize)
+        else:
+            ax.set_ylabel("")
+            # Hide y-axis labels for non-TDA models unless explicitly requested
+            if show_y_labels:
+                ax.tick_params(axis='both', labelsize=fontsize)
+            else:
+                ax.tick_params(axis='both', labelsize=fontsize, labelleft=False)
+    
+    # Align y-labels if requested and figure is provided
+    if align_ylabels and fig is not None:
+        fig.align_ylabels(ax)
 
 
 def gmx_process_trajectory(
@@ -323,6 +405,12 @@ def plot_pmf(
         ax.set_xlabel("CV", fontsize=FONTSIZE_SMALL)
         ax.set_ylabel("PMF [kJ/mol]", fontsize=FONTSIZE_SMALL)
         plt.grid(True, alpha=0.3)
+        format_plot_axes(
+            ax, fig=fig, 
+            model_type=cfg.method, 
+            show_y_labels=(cfg.method == "tda"),
+            align_ylabels=True
+        )
         plt.tight_layout()
         plt.savefig(plot_path, dpi=300, bbox_inches="tight")
         logger.info(f"PMF plot saved to {plot_path}")
@@ -478,9 +566,12 @@ def plot_free_energy_curve(
         plt.yticks(fontsize=FONTSIZE_SMALL)
         plt.xlabel('Time [ns]', fontsize=FONTSIZE_SMALL)
         plt.ylabel(r'$\Delta F$ [kJ/mol]', fontsize=FONTSIZE_SMALL)
-        # plt.title(f'Free Energy Difference (CVs) - {cfg.method}')
-        # plt.legend(fontsize=FONTSIZE_SMALL)
-        plt.grid(True, alpha=0.3)
+        format_plot_axes(
+            ax, fig=fig, 
+            model_type=cfg.method, 
+            show_y_labels=(cfg.method == "tda"),
+            align_ylabels=True
+        )
         plt.tight_layout()
         
         # Logging
@@ -558,12 +649,15 @@ def plot_rmsd_analysis(
                 fig = plt.figure(figsize=(5, 3))
                 ax = fig.add_subplot(111)
                 plt.plot(time_grid, rmsd_values, color=blue, linewidth=4, label='RMSD')
-                plt.xlabel('Time (ns)')
-                plt.ylabel('RMSD (nm)')
-                ax.set_title(f'CA RMSD to Reference - {cfg.method}, {seed}')
+                ax.set_xlabel('Time (ns)', fontsize=FONTSIZE_SMALL)
+                ax.set_ylabel('RMSD (nm)', fontsize=FONTSIZE_SMALL)
                 ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
-                # ax.set_yticks([-1, -0.5, 0, 0.5, 1])
-                ax.grid(True, alpha=0.3)
+                format_plot_axes(
+                    ax, fig=fig, 
+                    model_type=cfg.method, 
+                    show_y_labels=(cfg.method == "tda"),
+                    align_ylabels=True
+                )
                 plt.tight_layout()
                 
                 # Save plot
@@ -647,21 +741,25 @@ def plot_tica_scatter(
                     continue
             
                 # Create plot
-                fig = plt.figure(figsize=(6, 5))
+                fig = plt.figure(figsize=(4, 4))
                 ax = fig.add_subplot(111)
                 h = ax.hist2d(
                     tica_coord_full[:, 0], tica_coord_full[:, 1], 
                     bins=100, norm=LogNorm(), alpha=0.3
                 )
-                plt.colorbar(h[3], ax=ax, label='Log Density')
+                # plt.colorbar(h[3], ax=ax, label='Log Density')
                 ax.scatter(
                     tica_coord[:, 0], tica_coord[:, 1], 
                     color=blue, s=2, alpha=0.5,
                 )
-                ax.set_xlabel("TIC 1")
-                ax.set_ylabel("TIC 2")
-                ax.set_title(f'TICA Scatter Plot - {cfg.method}')
-                ax.grid(True, alpha=0.3)
+                ax.set_xlabel("TIC 1", fontsize=FONTSIZE_SMALL)
+                ax.set_ylabel("TIC 2", fontsize=FONTSIZE_SMALL)
+                format_plot_axes(
+                    ax, fig=fig, 
+                    model_type=cfg.method, 
+                    show_y_labels=(cfg.method == "tda"),
+                    align_ylabels=True
+                )
                 plt.savefig(plot_path, dpi=300, bbox_inches="tight")
                 logger.info(f"TICA scatter plot saved to {plot_path}")
                 wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
@@ -709,10 +807,14 @@ def plot_cv_over_time(
                     ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, color=blue)
                     ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
                     ax.set_yticks([-1, -0.5, 0, 0.5, 1])
-                    ax.set_xlabel("Time (ns)")
-                    ax.set_ylabel("CV Values")
-                    ax.set_title(f"CV Evolution - {cfg.method} {seed}")
-                    ax.grid(True, alpha=0.3)
+                    ax.set_xlabel("Time (ns)", fontsize=FONTSIZE_SMALL)
+                    ax.set_ylabel("CV Values", fontsize=FONTSIZE_SMALL)
+                    format_plot_axes(
+                        ax, fig=fig, 
+                        model_type=cfg.method, 
+                        show_y_labels=(cfg.method == "tda"),
+                        align_ylabels=True
+                    )
                     plt.tight_layout()
                     plt.savefig(plot_path, dpi=300, bbox_inches="tight")
                     logger.info(f"CV over time plot saved to {plot_path}")
@@ -726,10 +828,14 @@ def plot_cv_over_time(
                     fig = plt.figure(figsize=(5, 3))
                     ax = fig.add_subplot(111)
                     ax.hist(cv, bins=50, alpha=0.7, color=blue, edgecolor='black', log=True)
-                    ax.set_xlabel("CV Values")
-                    ax.set_ylabel("Frequency")
-                    ax.set_title(f"CV Histogram - {cfg.method} {seed}")
-                    ax.grid(True, alpha=0.3)
+                    ax.set_xlabel("CV Values", fontsize=FONTSIZE_SMALL)
+                    ax.set_ylabel("Frequency", fontsize=FONTSIZE_SMALL)
+                    format_plot_axes(
+                        ax, fig=fig, 
+                        model_type=cfg.method, 
+                        show_y_labels=(cfg.method == "tda"),
+                        align_ylabels=True
+                    )
                     plt.tight_layout()
                     plt.savefig(plot_path, dpi=300, bbox_inches="tight")
                     logger.info(f"CV histogram plot saved to {plot_path}")
