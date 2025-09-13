@@ -590,6 +590,7 @@ def save_plot_dual_format(
     bbox_inches='tight',
     pad_inches=0.1,
     rasterized=True,
+    file_log_name = None,
 ):
     """
     Save plot in both PNG and PDF formats with existence checking.
@@ -601,7 +602,7 @@ def save_plot_dual_format(
         bbox_inches: Bounding box setting for tight layout
         pad_inches: Padding for tight layout
         rasterized: Whether to rasterize the plot elements (reduces file size)
-    
+        file_log_name: Name to log to wandb
     Returns:
         bool: True if files were saved, False if they already existed
     """
@@ -630,8 +631,10 @@ def save_plot_dual_format(
                 pad_inches=pad_inches,
             )
             print(f">> Saved {png_path}")
+        if file_log_name == None:
+            file_log_name = filename
         wandb.log({
-            f"{filename}.png": wandb.Image(str(png_path))
+            f"{file_log_name}": wandb.Image(str(png_path))
         })
         
         # Save as PDF
@@ -678,6 +681,9 @@ def plot_tica_cv_analysis(
         
         if check_image_exists(img_dir, filename):
             print(f"> Skipping {filename}.png - already exists")
+            wandb.log({
+                filename: wandb.Image(str(img_dir / f"{filename}.png"))
+            })
             continue
         print(f"> Plotting TICA-CV analysis for {model_type} {molecule}")
         
@@ -707,7 +713,11 @@ def plot_tica_cv_analysis(
             show_y_labels=(model_type == "tda"),
             align_ylabels=True
         )
-        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        save_plot_dual_format(
+            img_dir, filename,
+            dpi=300, bbox_inches='tight',
+            file_log_name="TICA-CV"
+        )
         plt.close()
 
         # 3D scatter plot
@@ -731,11 +741,18 @@ def plot_tica_cv_analysis(
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_zticks([-1.0, 0.0, 1.0])
-            ax.tick_params(axis='both', labelsize=FONTSIZE_SMALL)
             ax.view_init(azim=-85)
-            
-            plt.tight_layout()
-            save_plot_dual_format(img_dir, filename_3d, dpi=300, bbox_inches='tight')
+            format_plot_axes(
+                ax, fig=fig, 
+                model_type=model_type, 
+                show_y_labels=(model_type == "tda"),
+                align_ylabels=True
+            )
+            save_plot_dual_format(
+                img_dir, filename_3d,
+                dpi=300, bbox_inches='tight',
+                file_log_name="TICA-CV-3D"
+            )
             plt.close()
 
 def plot_cv_tica_analysis(
@@ -780,7 +797,7 @@ def plot_cv_tica_analysis(
         # plt.xlabel("CV 0")
         # plt.ylabel("CV 1")
         # plt.title(f"CV 2D Histogram (colored by TICA-1) - {model_type.upper()}")
-        save_plot_dual_format(img_dir, filename_tica1, dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename_tica1, dpi=300, bbox_inches='tight', file_log_name="CV-TICA-1")
         plt.close()
     else:
         print(f"> Skipping {filename_tica1}.png - already exists")
@@ -812,7 +829,7 @@ def plot_cv_tica_analysis(
         # plt.xlabel("CV 0")
         # plt.ylabel("CV 1")
         # plt.title(f"CV 2D Histogram (colored by TICA-2) - {model_type.upper()}")
-        save_plot_dual_format(img_dir, filename_tica2, dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename_tica2, dpi=300, bbox_inches='tight', file_log_name="CV-TICA-2")
         plt.close()
     else:
         print(f"> Skipping {filename_tica2}.png - already exists")
@@ -873,9 +890,11 @@ def plot_cv_histogram(
         # ax.set_xlabel(f'CV {cv_dim} Values', fontsize=12)
         # ax.set_ylabel('Frequency', fontsize=12)
         # ax.set_title(f'Histogram of CV {cv_dim} Values - {model_type.upper()}', fontsize=14)
-        
-        plt.tight_layout()
-        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        save_plot_dual_format(
+            img_dir, filename,
+            dpi=300, bbox_inches='tight',
+            file_log_name=f"CV-Histogram-{cv_dim}"
+        )
         plt.close()
 
 def plot_bond_analysis(
@@ -940,7 +959,11 @@ def plot_bond_analysis(
             align_ylabels=True
         )
         # ax.set_title(f"CV {cv_dim} vs Bond Number - {model_type.upper()}")
-        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        save_plot_dual_format(
+            img_dir, filename,
+            dpi=300, bbox_inches='tight',
+            file_log_name=f"CV-Bond-Number-{cv_dim}"
+        )
         plt.close()
 
 def plot_committor_analysis(
@@ -1012,7 +1035,11 @@ def plot_committor_analysis(
             align_ylabels=True
         )
 
-        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        save_plot_dual_format(
+            img_dir, filename,
+            dpi=300, bbox_inches='tight',
+            file_log_name=f"Committor-{cv_dim}"
+        )
         plt.close()
 
 def plot_rmsd_analysis(
@@ -1107,7 +1134,11 @@ def plot_rmsd_analysis(
             align_ylabels=True
         )
         
-        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        save_plot_dual_format(
+            img_dir, filename,
+            dpi=300, bbox_inches='tight',
+            file_log_name=f"RMSD-{cv_dim}"
+        )
         plt.close()
 
 def plot_dssp_full_violin_analysis(
@@ -1198,9 +1229,9 @@ def plot_dssp_full_violin_analysis(
         ax.set_title(f'CV {cv_dim} Distribution by DSSP Full Secondary Structure - {model_type.upper()}')
         ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
         ax.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight',
+            file_log_name=f"DSSP-Full-Violin-{cv_dim}"
+        )
         plt.close()
 
 def plot_dssp_simplified_violin_analysis(
@@ -1283,8 +1314,11 @@ def plot_dssp_simplified_violin_analysis(
             model_type=model_type, 
             show_y_labels=True
         )
-        plt.tight_layout()
-        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        save_plot_dual_format(
+            img_dir, filename,
+            dpi=300, bbox_inches='tight',
+            file_log_name=f"DSSP-Simplified-Violin-{cv_dim}"
+        )
         plt.close()
 
 def plot_dssp_cv_heatmap(
@@ -1400,8 +1434,11 @@ def plot_dssp_cv_heatmap(
             cbar.set_label(f'Mean CV {cv_dim} Value', fontsize=11)
             
             # Save in both formats with tight layout and reduced spacing
-            plt.tight_layout(pad=0.5)
-            save_plot_dual_format(img_dir, filename, bbox_inches='tight', pad_inches=0.1)
+            save_plot_dual_format(
+                img_dir, filename,
+                bbox_inches='tight', pad_inches=0.1,
+                file_log_name=f"DSSP-CV-Heatmap-{cv_dim}"
+            )
             plt.close()
 
 def plot_per_residue_violin_analysis(
@@ -1519,8 +1556,11 @@ def plot_per_residue_violin_analysis(
             axes[idx].set_visible(False)
         
         plt.suptitle(f'CV {cv_dim} Distribution by Secondary Structure for Each Residue - {model_type.upper()}', fontsize=14)
-        plt.tight_layout()
-        save_plot_dual_format(img_dir, filename, dpi=300, bbox_inches='tight')
+        save_plot_dual_format(
+            img_dir, filename,
+            dpi=300, bbox_inches='tight',
+            file_log_name=f"DSSP-Per-Residue-Violin-{cv_dim}"
+        )
         plt.close()
 
 def plot_dssp_composition_heatmap(
@@ -1623,9 +1663,11 @@ def plot_dssp_composition_heatmap(
         # Add colorbar with reduced padding
         cbar = plt.colorbar(im, ax=ax, shrink=0.8)
         cbar.set_label('Proportion of Frames', fontsize=11)
-        
-        plt.tight_layout(pad=0.5)
-        save_plot_dual_format(img_dir, filename, bbox_inches='tight', pad_inches=0.1)
+        save_plot_dual_format(
+            img_dir, filename,
+            bbox_inches='tight', pad_inches=0.1,
+            file_log_name=f"DSSP-Composition-Heatmap-{dssp_type}"
+        )
         plt.close()
 
 def analyze_correlations(

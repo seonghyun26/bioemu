@@ -513,7 +513,6 @@ def plot_pmf(
             show_y_labels=(cfg.method == "tda"),
             align_ylabels=True
         )
-        plt.tight_layout()
         save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
         logger.info(f"PMF plot saved to {analysis_dir}")
         wandb.log({
@@ -674,7 +673,6 @@ def plot_free_energy_curve(
             show_y_labels=(cfg.method == "tda"),
             align_ylabels=True
         )
-        plt.tight_layout()
         
         # Logging
         save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
@@ -760,7 +758,6 @@ def plot_rmsd_analysis(
                     show_y_labels=(cfg.method == "tda"),
                     align_ylabels=True
                 )
-                plt.tight_layout()
                 
                 # Save plot
                 save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
@@ -919,7 +916,6 @@ def plot_cv_over_time(
                         show_y_labels=(cfg.method == "tda"),
                         align_ylabels=True
                     )
-                    plt.tight_layout()
                     save_plot_dual_format(str(analysis_dir), filename_time, dpi=300, bbox_inches="tight")
                     logger.info(f"CV over time plot saved to {analysis_dir}")
                     wandb.log({
@@ -940,7 +936,6 @@ def plot_cv_over_time(
                         show_y_labels=(cfg.method == "tda"),
                         align_ylabels=True
                     )
-                    plt.tight_layout()
                     save_plot_dual_format(str(analysis_dir), filename_histogram, dpi=300, bbox_inches="tight")
                     logger.info(f"CV histogram plot saved to {analysis_dir}")
                     wandb.log({
