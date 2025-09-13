@@ -1,7 +1,7 @@
-molecule: gtt
-method: tica
+molecule: 2jof
+method: tda
 ckpt_dir: _baseline_
-ckpt_path: tica-GTT
+ckpt_path: tda-2JOF
 date: debug
 tags: ['opes']
 start_gpu: 0
