@@ -517,7 +517,7 @@ def plot_pmf(
         logger.info(f"PMF plot saved to {analysis_dir}")
         wandb.log({
             "pmf": wandb.Image(str(analysis_dir / f"{filename}.png")),
-            "pmf_mae": round(pmf_mae, 2) if ~np.isnan(pmf_mae) and ~np.isnan(reference_pmf) else pmf_mae,
+            "pmf_mae": round(pmf_mae, 2),
             "pmf_std": round(std_pmf[~np.isnan(std_pmf)].mean(), 2)
         })
         plt.close()
