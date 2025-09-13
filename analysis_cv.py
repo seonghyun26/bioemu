@@ -461,12 +461,25 @@ def get_molecule_residue_range(
         tuple: (residue_indices, residue_indices_0) where residue_indices are 1-indexed
                and residue_indices_0 are 0-indexed for array slicing
     """
+    # if molecule == "CLN025":
+    #     residue_indices = list(range(1, 11))  # 1-10
+    #     residue_indices_0 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    # elif molecule == "2JOF":
+    #     residue_indices = list(range(1, 16))  # 1-15
+    #     residue_indices_0 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    
     if molecule == "CLN025":
-        residue_indices = list(range(1, 11))  # 1-10
-        residue_indices_0 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        residue_indices = [1, 2, 7, 8]
+        residue_indices_0 = [0, 1, 6, 7]
     elif molecule == "2JOF":
-        residue_indices = list(range(1, 16))  # 1-15
-        residue_indices_0 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        residue_indices = [2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
+        residue_indices_0 = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12]
+    elif molecule == "1FME":
+        residue_indices = [4, 5, 6, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+        residue_indices_0 = [3, 4, 5, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+    elif molecule == "GTT":
+        residue_indices = [7, 8, 9, 10, 11, 17, 18, 19, 20, 21, 27, 28]
+        residue_indices_0 = [6, 7, 8, 9, 10, 16, 17, 18, 19, 20, 26, 27]
     else:
         print(f"No specific residue range defined for molecule {molecule}, using all residues")
         residue_indices = None
@@ -682,7 +695,7 @@ def plot_tica_cv_analysis(
         if check_image_exists(img_dir, filename):
             print(f"> Skipping {filename}.png - already exists")
             wandb.log({
-                filename: wandb.Image(str(img_dir / f"{filename}.png"))
+                filename: wandb.Image(str(f"{img_dir}/{filename}.png"))
             })
             continue
         print(f"> Plotting TICA-CV analysis for {model_type} {molecule}")
@@ -1283,36 +1296,32 @@ def plot_dssp_simplified_violin_analysis(
             continue
         
         # Create violin plot
-        fig, ax = plt.subplots(figsize=RECTANGLE_FIGSIZE)
+        fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
+        ax = fig.add_subplot(111)
         
-        # Prepare data for violin plot
         violin_data = []
         violin_labels = []
-        
         for ss_type in sorted(ss_cv_data.keys()):
             violin_data.append(ss_cv_data[ss_type])
             violin_labels.append(ss_type)  # Simplified DSSP already has simple labels
-        
-        # Create violin plot
         violin_parts = ax.violinplot(
             violin_data, positions=range(len(violin_data)), 
             showmeans=True, showmedians=False, showextrema=True
         )
         
-        # Customize violin plot
         format_violin_parts(violin_parts)
         
+        # ax.set_title(f'CV {cv_dim} Distribution by DSSP Simplified Secondary Structure - {model_type.upper()}')
         ax.set_xticks(range(len(violin_labels)))
-        ax.set_xticklabels(violin_labels, rotation=45)
-        ax.set_ylabel(f'CV {cv_dim} Values')
-        ax.set_title(f'CV {cv_dim} Distribution by DSSP Simplified Secondary Structure - {model_type.upper()}')
+        ax.set_xticklabels(violin_labels, rotation=45, fontsize=FONTSIZE_SMALL)
+        if model_type == "tda":
+            ax.set_ylabel(f'CV', fontsize=FONTSIZE_SMALL)
         ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
-        
-        # Apply consistent formatting
         format_plot_axes(
             ax, fig=fig, 
             model_type=model_type, 
-            show_y_labels=True
+            show_y_labels=(model_type == "tda"),
+            align_ylabels=True
         )
         save_plot_dual_format(
             img_dir, filename,
@@ -1463,17 +1472,17 @@ def plot_per_residue_violin_analysis(
     
     # Define selected residues for different molecules
     if molecule == "CLN025":
-        selected_residues = [0, 1, 2, 7, 8, 9]
+        selected_residues = [1, 2, 7, 8]
     elif molecule == "2JOF":
-        selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
-    elif molecule == "2F4K":
-        selected_residues = [2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+        selected_residues = [2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
     elif molecule == "1FME":
-        selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+        selected_residues = [4, 5, 6, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
     elif molecule == "GTT":
-        selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38]
-    elif molecule == "NTL9":
-        selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
+        selected_residues = [7, 8, 9, 10, 11, 17, 18, 19, 20, 21, 27, 28]
+    # elif molecule == "2F4K":
+    #     selected_residues = [2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+    # elif molecule == "NTL9":
+    #     selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
     else:
         print(f"No specific residues defined for molecule {molecule}, skipping per-residue analysis")
         return
@@ -1538,24 +1547,31 @@ def plot_per_residue_violin_analysis(
             )
             
             format_violin_parts(violin_parts)
-            ax.set_xlabel('Secondary Structure')
-            ax.set_ylabel(f'CV {cv_dim} Value')
+            
+            # ax.set_title(f'Residue {residue_label}')
+            ss_labels = ['Coil' if ss == ' ' else ss for ss in ss_types_present]
+            ax.set_xlabel(f'Secondary Structure {residue_idx}', fontsize=FONTSIZE_SMALL)
+            if model_type == "tda":
+                ax.set_ylabel(f'CV {cv_dim} Value', fontsize=FONTSIZE_SMALL)
+                ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
             if residue_indices is not None and residue_idx < len(residue_indices):
                 residue_label = residue_indices[residue_idx]
             else:
                 residue_label = residue_idx + 1
-            ax.set_title(f'Residue {residue_label}')
-            ax.grid(True, alpha=0.3)
-            ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
-            ss_labels = ['Coil' if ss == ' ' else ss for ss in ss_types_present]
             ax.set_xticks(range(len(ss_types_present)))
-            ax.set_xticklabels(ss_labels)
+            ax.set_xticklabels(ss_labels, fontsize=FONTSIZE_SMALL)
+            format_plot_axes(
+                ax, fig=fig, 
+                model_type=model_type, 
+                show_y_labels=(model_type == "tda"),
+                align_ylabels=True
+            )
             plot_idx += 1
         
         for idx in range(len(residue_data), len(axes)):
             axes[idx].set_visible(False)
         
-        plt.suptitle(f'CV {cv_dim} Distribution by Secondary Structure for Each Residue - {model_type.upper()}', fontsize=14)
+        # plt.suptitle(f'CV {cv_dim} Distribution by Secondary Structure for Each Residue - {model_type.upper()}', fontsize=14)
         save_plot_dual_format(
             img_dir, filename,
             dpi=300, bbox_inches='tight',
@@ -1834,11 +1850,11 @@ def main():
                 plot_rmsd_analysis(cv, molecule, model_type, img_dir_mol, args.date)
                 
                 # DSSP analysis - load and filter data once
-                # print(f"\nLoading DSSP data for {molecule}...")
-                # dssp_data = load_and_filter_dssp_data(molecule)
+                print(f"\nLoading DSSP data for {molecule}...")
+                dssp_data = load_and_filter_dssp_data(molecule)
+                plot_per_residue_violin_analysis(cv, dssp_data, model_type, molecule, img_dir_mol, args.date)
+                plot_dssp_simplified_violin_analysis(cv, dssp_data, model_type, img_dir_mol, args.date)
                 # plot_dssp_full_violin_analysis(cv, dssp_data, model_type, img_dir_mol, args.date)
-                # plot_dssp_simplified_violin_analysis(cv, dssp_data, model_type, img_dir_mol, args.date)
-                # plot_per_residue_violin_analysis(cv, dssp_data, model_type, molecule, img_dir_mol, args.date)
                 # plot_dssp_cv_heatmap(cv, dssp_data, model_type, img_dir_mol, args.date)
                 # plot_dssp_composition_heatmap(dssp_data, img_dir_mol)
                 
