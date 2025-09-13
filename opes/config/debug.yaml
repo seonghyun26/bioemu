@@ -1,7 +1,7 @@
-molecule: 2jof
-method: tda
+molecule: cln025
+method: tae
 ckpt_dir: _baseline_
-ckpt_path: tda-2JOF
+ckpt_path: tae-CLN025
 date: debug
 tags: ['opes']
 start_gpu: 0
