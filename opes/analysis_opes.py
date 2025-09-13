@@ -554,12 +554,12 @@ def plot_free_energy_curve(
                 )
         ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
         if cfg.molecule == "cln025":
-            ax.set_yticks([-10, 0, 10, 20])
+            ax.set_yticks([-15, 0, 15, 30])
         else:
             ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
         ax.set_xlim(0.0, time_axis[-1])
         if cfg.molecule == "cln025":
-            ax.set_ylim(-20, 30)
+            ax.set_ylim(-20, 35)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         plt.xticks(fontsize=FONTSIZE_SMALL)
@@ -837,10 +837,10 @@ def plot_cv_over_time(
                         align_ylabels=True
                     )
                     plt.tight_layout()
-                    plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-                    logger.info(f"CV histogram plot saved to {plot_path}")
+                    plt.savefig(plot_path_histogram, dpi=300, bbox_inches="tight")
+                    logger.info(f"CV histogram plot saved to {plot_path_histogram}")
                     wandb.log({
-                        f"cv_histogram_{seed}": wandb.Image(str(plot_path))
+                        f"cv_histogram_{seed}": wandb.Image(str(plot_path_histogram))
                     })
                     plt.close()
                 
