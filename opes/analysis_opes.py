@@ -21,6 +21,10 @@ from torch.utils.data import TensorDataset, DataLoader
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+import matplotlib.collections
+import matplotlib.lines
+import matplotlib.patches
+import matplotlib.image
 from matplotlib.colors import LogNorm
 
 from adaptive_sampling.processing_tools import mbar
@@ -115,6 +119,104 @@ def format_plot_axes(
     # Align y-labels if requested and figure is provided
     if align_ylabels and fig is not None:
         fig.align_ylabels(ax)
+
+
+def rasterize_plot_elements():
+    """
+    Apply rasterization to data elements in the current figure while keeping text/labels as vectors.
+    This reduces file size for plots with many data points.
+    """
+    fig = plt.gcf()
+    for ax in fig.get_axes():
+        for child in ax.get_children():
+            if hasattr(child, 'set_rasterized'):
+                # Rasterize data elements but keep text/labels as vectors
+                if any(isinstance(child, cls) for cls in [
+                    matplotlib.collections.Collection,    # Scatter plots, hexbin, etc.
+                    matplotlib.lines.Line2D,              # Line plots
+                    matplotlib.patches.Rectangle,         # Bar plots, histograms
+                    matplotlib.patches.Polygon,           # Violin plots
+                    matplotlib.image.AxesImage,           # Heatmaps, images
+                ]):
+                    child.set_rasterized(True)
+
+
+def check_image_exists(
+    img_dir,
+    filename,
+):
+    """Check if image file already exists."""
+    png_path = os.path.join(img_dir, f"{filename}.png")
+    pdf_path = os.path.join(img_dir, f"pdf/{filename}.pdf")
+    return os.path.exists(png_path) and os.path.exists(pdf_path)
+
+
+def save_plot_dual_format(
+    img_dir,
+    filename,
+    dpi=200,
+    bbox_inches='tight',
+    pad_inches=0.1,
+    rasterized=True,
+):
+    """
+    Save plot in both PNG and PDF formats with existence checking.
+    
+    Args:
+        img_dir: Directory to save images
+        filename: Base filename without extension
+        dpi: Resolution for PNG format
+        bbox_inches: Bounding box setting for tight layout
+        pad_inches: Padding for tight layout
+        rasterized: Whether to rasterize the plot elements (reduces file size)
+    
+    Returns:
+        bool: True if files were saved, False if they already existed
+    """
+    os.makedirs(img_dir, exist_ok=True)
+    os.makedirs(os.path.join(img_dir, "pdf"), exist_ok=True)
+    
+    png_path = os.path.join(img_dir, f"{filename}.png")
+    pdf_path = os.path.join(img_dir, f"pdf/{filename}.pdf")
+    
+    # Check if both files already exist
+    if check_image_exists(img_dir, filename):
+        print(f"> Skipping {filename} - both PNG and PDF already exist")
+        return False
+    
+    # Save in both formats
+    try:
+        # Save as PNG
+        if not os.path.exists(png_path):
+            plt.savefig(
+                png_path,
+                dpi=dpi,
+                bbox_inches=bbox_inches,
+                pad_inches=pad_inches,
+            )
+            print(f">> Saved {png_path}")
+            wandb.log({
+                f"{filename}.png": wandb.Image(str(png_path))
+            })
+        
+        # Save as PDF
+        if not os.path.exists(pdf_path):
+            if rasterized:
+                rasterize_plot_elements()
+            plt.savefig(
+                pdf_path,
+                dpi=dpi,
+                bbox_inches=bbox_inches,
+                pad_inches=pad_inches,
+            )
+            wandb.save(pdf_path)
+            print(f">> Saved {pdf_path}")
+
+        return True
+        
+    except Exception as e:
+        print(f"Error saving {filename}: {e}")
+        return False
 
 
 def gmx_process_trajectory(
@@ -298,11 +400,11 @@ def plot_pmf(
     reference_cvs: np.ndarray,
 ):
     equil_temp = 340
-    plot_path = analysis_dir / "pmf.png"
-    if os.path.exists(plot_path):
-        print(f"✓ PMF plot already exists: {plot_path}")
+    filename = "pmf"
+    if check_image_exists(str(analysis_dir), filename):
+        print(f"✓ PMF plot already exists: {filename}")
         wandb.log({
-            "pmf": wandb.Image(str(plot_path)),
+            "pmf": wandb.Image(str(analysis_dir / f"{filename}.png")),
         })
         return
     
@@ -412,10 +514,10 @@ def plot_pmf(
             align_ylabels=True
         )
         plt.tight_layout()
-        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-        logger.info(f"PMF plot saved to {plot_path}")
+        save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
+        logger.info(f"PMF plot saved to {analysis_dir}")
         wandb.log({
-            "pmf": wandb.Image(str(plot_path)),
+            "pmf": wandb.Image(str(analysis_dir / f"{filename}.png")),
             "pmf_mae": round(pmf_mae, 2),
             "pmf_std": round(std_pmf[~np.isnan(std_pmf)].mean(), 2)
         })
@@ -431,11 +533,11 @@ def plot_free_energy_curve(
     analysis_dir: Path,
     reference_cvs: np.ndarray,
 ):
-    plot_path = analysis_dir / "free_energy_curve.png"
-    if os.path.exists(plot_path):
-        print(f"✓ Free energy curve plot already exists: {plot_path}")
+    filename = "free_energy_curve"
+    if check_image_exists(str(analysis_dir), filename):
+        print(f"✓ Free energy curve plot already exists: {filename}")
         wandb.log({
-            "free_energy_curve": wandb.Image(str(plot_path)),
+            "free_energy_curve": wandb.Image(str(analysis_dir / f"{filename}.png")),
         })
         return
     
@@ -575,10 +677,10 @@ def plot_free_energy_curve(
         plt.tight_layout()
         
         # Logging
-        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-        logger.info(f"Free energy curve saved to {plot_path}")
+        save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
+        logger.info(f"Free energy curve saved to {analysis_dir}")
         log_info = {
-            "free_energy_curve": wandb.Image(str(plot_path)),
+            "free_energy_curve": wandb.Image(str(analysis_dir / f"{filename}.png")),
             "free_energy_difference": round(mean_delta_fs[-1], 2),
             "free_energy_difference_std": round(std_delta_fs[-1], 2),
             "free_energy_difference_reference": round(reference_Delta_F, 2),
@@ -605,11 +707,11 @@ def plot_rmsd_analysis(
         desc="Computing RMSD"
     )
     for seed in pbar:
-        plot_path = analysis_dir / f"rmsd_analysis_{seed}.png"
-        if os.path.exists(plot_path):
-            print(f"✓ RMSD analysis plot already exists: {plot_path}")
+        filename = f"rmsd_analysis_{seed}"
+        if check_image_exists(str(analysis_dir), filename):
+            print(f"✓ RMSD analysis plot already exists: {filename}")
             wandb.log({
-                "rmsd_analysis": wandb.Image(str(plot_path)),
+                "rmsd_analysis": wandb.Image(str(analysis_dir / f"{filename}.png")),
             })
             continue
         
@@ -661,10 +763,10 @@ def plot_rmsd_analysis(
                 plt.tight_layout()
                 
                 # Save plot
-                plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-                logger.info(f"RMSD analysis saved to {plot_path}")
+                save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
+                logger.info(f"RMSD analysis saved to {analysis_dir}")
                 wandb.log({
-                    "rmsd_analysis": wandb.Image(str(plot_path)),
+                    "rmsd_analysis": wandb.Image(str(analysis_dir / f"{filename}.png")),
                     "max_rmsd": round(float(np.max(rmsd_values)), 2),
                     "min_rmsd": round(float(np.min(rmsd_values)), 2)
                 })
@@ -691,10 +793,10 @@ def plot_tica_scatter(
         desc="Computing TICA scatter"
     )
     for seed in pbar:
-        plot_path = analysis_dir / f"tica_scatter_{seed}.png"
-        if os.path.exists(plot_path):
-            print(f"✓ TICA scatter plot already exists: {plot_path}")
-            wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
+        filename = f"tica_scatter_{seed}"
+        if check_image_exists(str(analysis_dir), filename):
+            print(f"✓ TICA scatter plot already exists: {filename}")
+            wandb.log({"tica_scatter": wandb.Image(str(analysis_dir / f"{filename}.png"))})
             continue
     
         else:
@@ -760,9 +862,11 @@ def plot_tica_scatter(
                     show_y_labels=(cfg.method == "tda"),
                     align_ylabels=True
                 )
-                plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-                logger.info(f"TICA scatter plot saved to {plot_path}")
-                wandb.log({"tica_scatter": wandb.Image(str(plot_path))})
+                save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
+                logger.info(f"TICA scatter plot saved to {analysis_dir}")
+                wandb.log({
+                    "tica_scatter": wandb.Image(str(analysis_dir / f"{filename}.png"))
+                })
                 plt.close()
     
             except Exception as e:
@@ -784,10 +888,10 @@ def plot_cv_over_time(
         desc="Computing CV over time"
     )
     for seed in pbar:
-        plot_path = analysis_dir / f"cv_over_time_{seed}.png"
-        plot_path_histogram = analysis_dir / f"cv_histogram_{seed}.png"
-        if os.path.exists(plot_path) and os.path.exists(plot_path_histogram):
-            print(f"✓ CV over time and histogram plots already exist: {plot_path} and {plot_path_histogram}")
+        filename_time = f"cv_over_time_{seed}"
+        filename_histogram = f"cv_histogram_{seed}"
+        if check_image_exists(str(analysis_dir), filename_time) and check_image_exists(str(analysis_dir), filename_histogram):
+            print(f"✓ CV over time and histogram plots already exist: {filename_time} and {filename_histogram}")
             continue
         
         else:
@@ -801,7 +905,7 @@ def plot_cv_over_time(
                 cv = traj_dat[:, 1]
                 
                 # Plot - CV over time
-                if not os.path.exists(plot_path):
+                if not check_image_exists(str(analysis_dir), filename_time):
                     fig = plt.figure(figsize=(5, 3))
                     ax = fig.add_subplot(111)
                     ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, color=blue)
@@ -816,15 +920,15 @@ def plot_cv_over_time(
                         align_ylabels=True
                     )
                     plt.tight_layout()
-                    plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-                    logger.info(f"CV over time plot saved to {plot_path}")
+                    save_plot_dual_format(str(analysis_dir), filename_time, dpi=300, bbox_inches="tight")
+                    logger.info(f"CV over time plot saved to {analysis_dir}")
                     wandb.log({
-                        f"cv_over_time_{seed}": wandb.Image(str(plot_path))
+                        f"cv_over_time_{seed}": wandb.Image(str(analysis_dir / f"{filename_time}.png"))
                     })
                     plt.close()
                 
                 # Plot - CV histogram
-                if not os.path.exists(plot_path_histogram):
+                if not check_image_exists(str(analysis_dir), filename_histogram):
                     fig = plt.figure(figsize=(5, 3))
                     ax = fig.add_subplot(111)
                     ax.hist(cv, bins=50, alpha=0.7, color=blue, edgecolor='black', log=True)
@@ -837,10 +941,10 @@ def plot_cv_over_time(
                         align_ylabels=True
                     )
                     plt.tight_layout()
-                    plt.savefig(plot_path_histogram, dpi=300, bbox_inches="tight")
-                    logger.info(f"CV histogram plot saved to {plot_path_histogram}")
+                    save_plot_dual_format(str(analysis_dir), filename_histogram, dpi=300, bbox_inches="tight")
+                    logger.info(f"CV histogram plot saved to {analysis_dir}")
                     wandb.log({
-                        f"cv_histogram_{seed}": wandb.Image(str(plot_path_histogram))
+                        f"cv_histogram_{seed}": wandb.Image(str(analysis_dir / f"{filename_histogram}.png"))
                     })
                     plt.close()
                 

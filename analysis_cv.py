@@ -630,9 +630,9 @@ def save_plot_dual_format(
                 pad_inches=pad_inches,
             )
             print(f">> Saved {png_path}")
-            wandb.log({
-                f"{filename}.png": wandb.Image(str(png_path))
-            })
+        wandb.log({
+            f"{filename}.png": wandb.Image(str(png_path))
+        })
         
         # Save as PDF
         if not os.path.exists(pdf_path):
@@ -645,6 +645,7 @@ def save_plot_dual_format(
                 pad_inches=pad_inches,
             )
             print(f">> Saved {pdf_path}")
+        wandb.save(pdf_path)
 
         return True
         
