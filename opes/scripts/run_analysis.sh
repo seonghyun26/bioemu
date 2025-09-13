@@ -8,5 +8,6 @@ echo $date
 python analysis_opes.py \
     --config-name $method-$molecule \
     date=$date \
+    +analysis.gmx=True \
     +tags=['vast']
 

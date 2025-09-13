@@ -11,6 +11,7 @@ opes:
   max_seed: 3
   ntomp: 1
 analysis:
+  gmx: True
   skip_steps: 50000
   unit_steps: 25000
   equil_temp: 325
