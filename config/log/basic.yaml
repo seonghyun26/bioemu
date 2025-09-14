@@ -10,6 +10,6 @@ mlcv_model:
   log: all
   watch_freq: 100
 date: now
-ckpt_freq: 100
+ckpt_freq: 200
 debug: False
 debug_mlcv: False

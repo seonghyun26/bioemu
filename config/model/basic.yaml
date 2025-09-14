@@ -6,7 +6,7 @@ score_model:
 training:
   seed: 0
   num_epochs: 100
-  batch_size: 1
+  batch_size: 800
   learning_rate: 1e-8
   scheduler:
     name: CosineAnnealingWarmUpRestarts

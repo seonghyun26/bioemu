@@ -18,6 +18,7 @@ import matplotlib as mpl
 
 
 from matplotlib.colors import LogNorm
+from matplotlib.ticker import MaxNLocator
 from tqdm import tqdm
 from itertools import combinations
 from scipy.stats import pearsonr, spearmanr
@@ -691,76 +692,81 @@ def plot_tica_cv_analysis(
         filename = f"tica-cv{cv_dim}-{model_type}"
         if date:
             filename += f"_{date}"
-        
         if check_image_exists(img_dir, filename):
             print(f"> Skipping {filename}.png - already exists")
             wandb.log({
                 filename: wandb.Image(str(f"{img_dir}/{filename}.png"))
             })
-            continue
-        print(f"> Plotting TICA-CV analysis for {model_type} {molecule}")
-        
-        fig = plt.figure(figsize=SQUARE_FIGSIZE)
-        ax = fig.add_subplot(111)
-        hb = ax.hexbin(
-            x, y, C=cv[:, cv_dim],
-            gridsize=200,
-            reduce_C_function=np.mean,
-            cmap='viridis',
-            zorder=2,
-            rasterized=True,
-        )
-        # plt.colorbar(hb)
-        ax.set_xlabel("TIC 1", fontsize=FONTSIZE_SMALL)
-        if model_type == "tda":
-            ax.set_ylabel("TIC 2", fontsize=FONTSIZE_SMALL)
-        # if molecule == "CLN025":
-        #     ax.set_xticks([-2, -1, 0])
-        #     if model_type == "tda":
-        #         ax.set_yticks([-6, -4, -2, 0, 2])
-        
-        # Apply consistent formatting
-        format_plot_axes(
-            ax, fig=fig, 
-            model_type=model_type, 
-            show_y_labels=(model_type == "tda"),
-            align_ylabels=True
-        )
-        save_plot_dual_format(
-            img_dir, filename,
-            dpi=300, bbox_inches='tight',
-            file_log_name="TICA-CV"
-        )
-        plt.close()
-
-        # 3D scatter plot
-        if plot_3d:
-            filename_3d = f"tica3d-cv{cv_dim}-{model_type}"
-            if date:
-                filename_3d += f"_{date}"
-                
-            if check_image_exists(img_dir, filename_3d):
-                print(f"> Skipping {filename_3d}.png - already exists")
-                continue
-                
-            z = cv[:, cv_dim]
-            fig = plt.figure(figsize=RECTANGLE_FIGSIZE)
-            ax = fig.add_subplot(111, projection='3d')
-            sc = ax.scatter(x, y, z, c=z, cmap='viridis', s=2, alpha=0.6)  # Smaller dots (s=2) and more transparent
-            ax.set_xlabel('TIC 1')
-            ax.set_ylabel('TIC 2')
-            ax.set_zlabel(f'CV {cv_dim}')
-            # ax.set_title(f'3D Scatter: CV {cv_dim} - {model_type.upper()}')
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.set_zticks([-1.0, 0.0, 1.0])
-            ax.view_init(azim=-85)
+        else:
+            print(f"> Plotting TICA-CV analysis for {model_type} {molecule}")
+            fig = plt.figure(figsize=SQUARE_FIGSIZE)
+            ax = fig.add_subplot(111)
+            hb = ax.hexbin(
+                x, y, C=cv[:, cv_dim],
+                gridsize=200,
+                reduce_C_function=np.mean,
+                cmap='viridis',
+                zorder=2,
+                rasterized=True,
+            )
+            # plt.colorbar(hb)
+            ax.set_xlabel("TIC 1", fontsize=FONTSIZE_SMALL)
+            if model_type == "tda":
+                ax.set_ylabel("TIC 2", fontsize=FONTSIZE_SMALL)
+            # if molecule == "CLN025":
+            #     ax.set_xticks([-2, -1, 0])
+            #     if model_type == "tda":
+            #         ax.set_yticks([-6, -4, -2, 0, 2])
+            
+            # Apply consistent formatting
             format_plot_axes(
                 ax, fig=fig, 
                 model_type=model_type, 
                 show_y_labels=(model_type == "tda"),
                 align_ylabels=True
             )
+            save_plot_dual_format(
+                img_dir, filename,
+                dpi=300, bbox_inches='tight',
+                file_log_name="TICA-CV"
+            )
+            plt.close()
+
+        # 3D scatter plot
+        filename_3d = f"tica3d-cv{cv_dim}-{model_type}"
+        if date:
+            filename_3d += f"_{date}"
+        if check_image_exists(img_dir, filename_3d) or not plot_3d:
+            print(f"> Skipping {filename_3d}.png - already exists")
+            wandb.log({
+                filename_3d: wandb.Image(str(f"{img_dir}/{filename_3d}.png"))
+            })
+        else:
+            print(f"> Plotting TICA-CV 3D scatter plot for {model_type} {molecule}")
+            z = cv[:, cv_dim]
+            fig = plt.figure(figsize=(5, 5), layout='constrained')
+            ax = fig.add_subplot(111, projection='3d')
+            
+            ax.scatter(x, y, z, c=z, cmap='viridis', s=2, alpha=0.6)
+            ax.set_xlabel('TIC 1', fontsize=FONTSIZE_SMALL, labelpad=10)
+            ax.set_ylabel('TIC 2', fontsize=FONTSIZE_SMALL, labelpad=10)
+            ax.set_zticks([-1.0, 0.0, 1.0])
+
+            if model_type == "ours":
+                ax.set_zlabel("CV", fontsize=FONTSIZE_SMALL, rotation=90)
+                ax.tick_params(axis='z', labelsize=FONTSIZE_SMALL)
+            else:
+                ax.tick_params(axis='z', labelsize=FONTSIZE_SMALL, labelleft=False)
+            ax.set_zlim(-1.0, 1.0)
+            ax.view_init(azim=-80, elev=25)
+            for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
+                axis.line.set_linewidth(LINEWIDTH)
+            ax.tick_params(axis='x', labelsize=FONTSIZE_SMALL)
+            ax.tick_params(axis='y', labelsize=FONTSIZE_SMALL)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=3))
+            ax.grid(True, alpha=0.3, linewidth=LINEWIDTH)
+
             save_plot_dual_format(
                 img_dir, filename_3d,
                 dpi=300, bbox_inches='tight',
@@ -1781,8 +1787,12 @@ def main():
     # Create image directory if it doesn't exist
     os.makedirs(args.img_dir, exist_ok=True)
     model_types = ['ours', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
-    molecules = ['1FME', '2F4K', 'GTT', 'NTL9'] if args.molecule == 'partial' else [args.molecule]
-    # molecules = ['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9'] if args.molecule == 'all' else [args.molecule]
+    if args.molecule == 'partial':
+        molecules = ['1FME', '2F4K', 'GTT', 'NTL9']
+    elif args.molecule == 'all':
+        molecules = ['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9']
+    else:
+        molecules = [args.molecule]
     
     for molecule in molecules:
         img_dir_mol = os.path.join(args.img_dir, molecule)

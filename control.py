@@ -12,7 +12,7 @@ from torch_geometric.data import Batch
 from tqdm import tqdm
 from omegaconf import OmegaConf,open_dict
 from pytorch_lightning import Trainer
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, random_split
 
 from bioemu.chemgraph import ChemGraph
 from bioemu.sample import get_context_chemgraph
@@ -670,6 +670,151 @@ def clip_loss(
     return loss, was_clipped
 
 
+def compute_validation_loss(
+    score_model: torch.nn.Module,
+    mlcv_model: torch.nn.Module,
+    validation_dataloader: DataLoader,
+    sdes: dict[str, SDE],
+    chemgraph: ChemGraph,
+    cfg: OmegaConf,
+    training_method: str = 'ppft',
+    mid_t: float = 0.786,
+    N_rollout: int = 5,
+    record_grad_steps: set[int] = set(),
+) -> float:
+    """
+    Compute validation loss without gradient computation.
+    
+    Args:
+        score_model: The score network
+        mlcv_model: The MLCV model
+        validation_dataloader: Validation data loader
+        sdes: Dictionary of SDEs
+        chemgraph: Template chemgraph
+        cfg: Configuration
+        training_method: Training method ('standard' or 'ppft')
+        mid_t: Mid timestep for PPFT
+        N_rollout: Number of rollout steps for PPFT
+        record_grad_steps: Steps to record gradients for PPFT
+    
+    Returns:
+        Average validation loss
+    """
+    score_model.eval()
+    mlcv_model.eval()
+    
+    total_val_loss = 0.0
+    num_batches = 0
+    
+    with torch.no_grad():
+        for batch in validation_dataloader:
+            current_data = batch["current_data"]
+            timelagged_data = batch["timelagged_data"]
+            current_orientation = batch["current_orientation"]
+            timelagged_orientation = batch["timelagged_orientation"]
+            mlcv = mlcv_model(current_data)
+            
+            if training_method == 'standard':
+                loss, _ = calc_standard_denoising_loss(
+                    score_model=score_model,
+                    mlcv=mlcv,
+                    target=timelagged_data,
+                    sdes=sdes,
+                    orientation=timelagged_orientation,
+                    batch=[chemgraph] * current_data.shape[0],
+                    cfg=cfg,
+                    condition_mode=cfg.model.mlcv_model.condition_mode,
+                    min_t=getattr(cfg.model.training, 'min_t', 1e-4),
+                    max_t=getattr(cfg.model.training, 'max_t', 0.99),
+                )
+            elif training_method == 'ppft':
+                loss, _ = calc_tlc_loss(
+                    score_model=score_model,
+                    mlcv=mlcv,
+                    target=timelagged_data,
+                    sdes=sdes,
+                    batch=[chemgraph] * current_data.shape[0],
+                    n_replications=1,
+                    mid_t=mid_t,
+                    N_rollout=N_rollout,
+                    record_grad_steps=record_grad_steps,
+                    condition_mode=cfg.model.mlcv_model.condition_mode,
+                    cfg=cfg,
+                )
+            else:
+                raise ValueError(f"Unknown training method: {training_method}")
+            
+            total_val_loss += loss.item()
+            num_batches += 1
+    
+    avg_val_loss = total_val_loss / num_batches if num_batches > 0 else float('inf')
+    
+    # Set models back to training mode
+    score_model.train()
+    mlcv_model.train()
+    
+    return avg_val_loss
+
+
+class EarlyStopping:
+    """
+    Early stopping utility to stop training when validation loss stops improving.
+    """
+    def __init__(
+        self,
+        monitor: str = 'valid_loss',
+        min_delta: float = 0.0,
+        patience: int = 10,
+        mode: str = 'min',
+        verbose: bool = True
+    ):
+        self.monitor = monitor
+        self.min_delta = min_delta
+        self.patience = patience
+        self.mode = mode
+        self.verbose = verbose
+        
+        self.best_score = None
+        self.counter = 0
+        self.early_stop = False
+        
+        if mode == 'min':
+            self.monitor_op = lambda current, best: current < best - min_delta
+            self.best_score = float('inf')
+        elif mode == 'max':
+            self.monitor_op = lambda current, best: current > best + min_delta
+            self.best_score = float('-inf')
+        else:
+            raise ValueError(f"Mode {mode} not supported. Use 'min' or 'max'.")
+    
+    def __call__(self, current_score: float) -> bool:
+        """
+        Check if training should stop.
+        
+        Args:
+            current_score: Current validation score
+            
+        Returns:
+            True if training should stop, False otherwise
+        """
+        if self.monitor_op(current_score, self.best_score):
+            self.best_score = current_score
+            self.counter = 0
+            if self.verbose:
+                print(f"✓ Validation {self.monitor} improved to {current_score:.6f}")
+        else:
+            self.counter += 1
+            if self.verbose:
+                print(f"⚠️  Validation {self.monitor} did not improve from {self.best_score:.6f} (patience: {self.counter}/{self.patience})")
+            
+            if self.counter >= self.patience:
+                self.early_stop = True
+                if self.verbose:
+                    print(f"🛑 Early stopping triggered! Best {self.monitor}: {self.best_score:.6f}")
+        
+        return self.early_stop
+
+
 def add_postprocessing_module(mlcv_model: torch.nn.Module, dataset: torch.utils.data.Dataset, device: torch.device, cfg: OmegaConf = None, reference_frame_path: str = None):
     """
     Add post-processing module to MLCV model based on full dataset statistics.
@@ -1086,22 +1231,35 @@ def main(cfg):
     else:
         raise ValueError(f"Scheduler {scheduler_name} not supported")
     
-    # Load data
+    # Load data and create train/validation split
     dataset = TimelagDataset(
         cfg_data = cfg.data,
         device=device,
     )
-    dataloader = DataLoader(
-        dataset,
+    
+    # Create train/validation split (80/20 by default)
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    
+    train_dataloader = DataLoader(
+        train_dataset,
         batch_size=batch_size,
         shuffle=True,
     )
+    val_dataloader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+    )
+    
+    print(f"Dataset split: {train_size} training samples, {val_size} validation samples")
     chemgraph = (
         get_context_chemgraph(sequence=cfg.data.sequence)
         .replace(system_id=cfg.data.system_id)
         .to(device)
     )
-    num_batches = len(dataloader)
+    num_batches = len(train_dataloader)
 
     # Training loop
     training_method = getattr(cfg.model.training, 'method', 'ppft')
@@ -1126,6 +1284,23 @@ def main(cfg):
         print(f"  - Min loss value: {min_loss_value}")
         print(f"  - Purpose: Prevent training instability from extreme losses")
     print(f"==============================\n")
+    
+    # Initialize early stopping
+    early_stopping_config = getattr(cfg.model.training, 'early_stopping', {})
+    early_stopping_enabled = early_stopping_config.get('enabled', False)
+    early_stopping = None
+    
+    if early_stopping_enabled:
+        early_stopping = EarlyStopping(
+            monitor=early_stopping_config.get('monitor', 'valid_loss'),
+            min_delta=early_stopping_config.get('min_delta', 0.01),
+            patience=early_stopping_config.get('patience', 10),
+            mode=early_stopping_config.get('mode', 'min'),
+            verbose=early_stopping_config.get('verbose', False),
+        )
+        print(f"Early stopping enabled: monitor={early_stopping.monitor}, patience={early_stopping.patience}, min_delta={early_stopping.min_delta}")
+    else:
+        print("Early stopping disabled")
     
     pbar = tqdm(
         range(num_epochs),
@@ -1156,9 +1331,9 @@ def main(cfg):
             zero_conv_mlp.train()
 
         for batch_idx, batch in enumerate(tqdm(
-            dataloader,
+            train_dataloader,
             desc=f"Epoch {epoch}/{num_epochs}",
-            total=len(dataloader),
+            total=len(train_dataloader),
             leave=False,
         )):
             optimizer.zero_grad()
@@ -1276,21 +1451,49 @@ def main(cfg):
                 if cfg.log.debug and batch_idx == 0:
                     print(f"Gradient clip results: total_norm={clipped_norm:.2e}, clip_val={clip_val}")
                     if clipped_norm > clip_val and clip_val > 0:
-                        print(f"⚠️  Gradients were clipped! (norm {clipped_norm:.2e} > {clip_val})")
+                        print(f"Gradients were clipped! (norm {clipped_norm:.2e} > {clip_val})")
                     else:
-                        print(f"✓ Gradients within bounds (no clipping needed)")
+                        print(f"Gradients within bounds (no clipping needed)")
                     
             optimizer.step()
         
         scheduler.step()
+        
+        # Compute validation loss and check early stopping
+        if early_stopping_enabled:
+            print(f"\nEvaluating validation loss...")
+            val_loss = compute_validation_loss(
+                score_model=score_model,
+                mlcv_model=mlcv_model,
+                validation_dataloader=val_dataloader,
+                sdes=sdes,
+                chemgraph=chemgraph,
+                cfg=cfg,
+                training_method=training_method,
+                mid_t=mid_t,
+                N_rollout=N_rollout,
+                record_grad_steps=record_grad_steps,
+            )
+            
+            # Check early stopping
+            should_stop = early_stopping(val_loss)
+            if should_stop:
+                print(f"🛑 Early stopping triggered at epoch {epoch+1}")
+                break
+        
         pbar.set_description(f"Loss: {total_loss/num_batches:.6f}")
         
         # Prepare logging data
         log_data = {
-            "loss": total_loss/num_batches,
+            "train_loss": total_loss/num_batches,
             "lr": optimizer.param_groups[0]['lr'],
             "epoch": epoch,
         }
+        
+        # Add validation loss to logging if early stopping is enabled
+        if early_stopping_enabled:
+            log_data["valid_loss"] = val_loss
+        
         wandb.log(log_data, step=epoch)
         
         # Save checkpoint
@@ -1305,11 +1508,16 @@ def main(cfg):
             }
             torch.save(checkpoint, f"model/{cfg.log.date}/checkpoint_{epoch+1}.pt")
         
-    # Print loss clipping summary
-    total_batches = num_epochs * num_batches
+    # Print training summary
+    actual_epochs = epoch + 1  # epoch is 0-indexed
+    total_batches = actual_epochs * num_batches
     overall_clip_rate = total_clips / total_batches if total_batches > 0 else 0
     print(f"\n=== TRAINING SUMMARY ===")
-    print(f"Training completed: {num_epochs} epochs, {total_batches} total batches")
+    print(f"Training completed: {actual_epochs} epochs, {total_batches} total batches")
+    if early_stopping_enabled and early_stopping.early_stop:
+        print(f"Early stopping triggered: Best validation loss = {early_stopping.best_score:.6f}")
+    elif early_stopping_enabled:
+        print(f"Training completed normally: Best validation loss = {early_stopping.best_score:.6f}")
     
     # Add post-processing module to MLCV model based on full dataset
     print(f"\n=== POST-PROCESSING MODULE ===")

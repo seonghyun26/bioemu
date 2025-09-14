@@ -597,8 +597,8 @@ class DiGConditionalScoreModel(torch.nn.Module):
         assert hasattr(x, "batch"), "batch of ChemGraphs must have a 'batch' attribute."
         
         # Debug: Check MLCV at DiG score model entry
-        if mlcv is not None and self.training:
-            print(f"      [DiGScoreModel] MLCV received: shape={mlcv.shape}, range=[{mlcv.min().item():.6f}, {mlcv.max().item():.6f}]")
+        # if mlcv is not None and self.training:
+            # print(f"      [DiGScoreModel] MLCV received: shape={mlcv.shape}, range=[{mlcv.min().item():.6f}, {mlcv.max().item():.6f}]")
         
         time_effective = t[x.batch] * 1000
         # NOTE: DiG takes in inverse rotations as input. To be consistent

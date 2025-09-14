@@ -4,6 +4,6 @@ date=$(date +%m%d_%H%M%S)
 
 
 CUDA_VISIBLE_DEVICES=$1 python control.py \
-    --config-name score-cln025-2dim \
+    --config-name score-cln025 \
     ++log.date=$date \
-    ++log.tags=['pilot','score','2dim']
+    ++log.tags=['pilot','score','early stopping']
