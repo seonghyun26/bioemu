@@ -243,7 +243,7 @@ def gmx_process_trajectory(
             cmd = [
                 "gmx", "trjconv",
                 "-f", f"{log_dir}/{seed}.xtc",
-                "-s", f"{data_dir}/nvt_0.tpr",
+                "-s", f"{data_dir}/md.tpr",
                 "-pbc", "mol",
                 "-o", trj_save_path,
             ]
