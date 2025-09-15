@@ -85,6 +85,16 @@ class OPESSimulationRunner:
         source_mlcv_model = self.mlcv_path
         target_mlcv_model = seed_dir / f"{self.cfg.ckpt_path}-jit.pt"
         shutil.copy2(source_mlcv_model, target_mlcv_model)
+        jit_model = torch.jit.load(target_mlcv_model)
+        jit_model.eval()
+        for name, param in jit_model.named_parameters():
+            if param.device != torch.device("cuda:0"):
+                jit_model = jit_model.to("cuda:0")
+                torch.jit.save(jit_model, target_mlcv_model)
+                logger.info(f"{target_mlcv_model} moved to cuda:0")
+            else:
+                logger.info(f"{target_mlcv_model} already at cuda")
+            break
         logger.info(f"Copied MLCV model: {source_mlcv_model} to {target_mlcv_model}")
         # if target_mlcv_model.exists() or target_mlcv_model.is_symlink():
         #     target_mlcv_model.unlink()
