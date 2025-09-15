@@ -167,10 +167,11 @@ class OPESSimulationRunner:
             "-bonded", "gpu",
             "-nb", "gpu",
             "-pme", "gpu",
-            # "-pin", "on",
+            "-pin", "on",
             "-pinoffset", str(gpu_id * ntomp_num),
+            "-pinstride", "1",
+            "-tunepme",
             # "-dlb", "no"
-            # "-tunepme",
             # "-update", "gpu",
         ]
         env = os.environ.copy()
