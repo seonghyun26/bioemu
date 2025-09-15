@@ -195,9 +195,6 @@ def save_plot_dual_format(
                 pad_inches=pad_inches,
             )
             print(f">> Saved {png_path}")
-            wandb.log({
-                f"{filename}.png": wandb.Image(str(png_path))
-            })
         
         # Save as PDF
         if not os.path.exists(pdf_path):
@@ -243,7 +240,7 @@ def gmx_process_trajectory(
             cmd = [
                 "gmx", "trjconv",
                 "-f", f"{log_dir}/{seed}.xtc",
-                "-s", f"{data_dir}/md.tpr",
+                "-s", f"{data_dir}/protein.tpr",
                 "-pbc", "mol",
                 "-o", trj_save_path,
             ]
@@ -510,7 +507,7 @@ def plot_pmf(
         format_plot_axes(
             ax, fig=fig, 
             model_type=cfg.method, 
-            show_y_labels=(cfg.method == "tda"),
+            show_y_labels=True,
             align_ylabels=True
         )
         save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
@@ -670,7 +667,7 @@ def plot_free_energy_curve(
         format_plot_axes(
             ax, fig=fig, 
             model_type=cfg.method, 
-            show_y_labels=(cfg.method == "tda"),
+            show_y_labels=True,
             align_ylabels=True
         )
         
@@ -709,7 +706,7 @@ def plot_rmsd_analysis(
         if check_image_exists(str(analysis_dir), filename):
             print(f"✓ RMSD analysis plot already exists: {filename}")
             wandb.log({
-                "rmsd_analysis": wandb.Image(str(analysis_dir / f"{filename}.png")),
+                f"rsmd/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png")),
             })
             continue
         
@@ -763,7 +760,7 @@ def plot_rmsd_analysis(
                 save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
                 logger.info(f"RMSD analysis saved to {analysis_dir}")
                 wandb.log({
-                    "rmsd_analysis": wandb.Image(str(analysis_dir / f"{filename}.png")),
+                    f"rmsd/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png")),
                     "max_rmsd": round(float(np.max(rmsd_values)), 2),
                     "min_rmsd": round(float(np.min(rmsd_values)), 2)
                 })
@@ -793,7 +790,9 @@ def plot_tica_scatter(
         filename = f"tica_scatter_{seed}"
         if check_image_exists(str(analysis_dir), filename):
             print(f"✓ TICA scatter plot already exists: {filename}")
-            wandb.log({"tica_scatter": wandb.Image(str(analysis_dir / f"{filename}.png"))})
+            wandb.log({
+                f"tica/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png"))
+            })
             continue
     
         else:
@@ -862,7 +861,7 @@ def plot_tica_scatter(
                 save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
                 logger.info(f"TICA scatter plot saved to {analysis_dir}")
                 wandb.log({
-                    "tica_scatter": wandb.Image(str(analysis_dir / f"{filename}.png"))
+                    f"tica/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png"))
                 })
                 plt.close()
     
@@ -919,7 +918,7 @@ def plot_cv_over_time(
                     save_plot_dual_format(str(analysis_dir), filename_time, dpi=300, bbox_inches="tight")
                     logger.info(f"CV over time plot saved to {analysis_dir}")
                     wandb.log({
-                        f"cv_over_time_{seed}": wandb.Image(str(analysis_dir / f"{filename_time}.png"))
+                        f"cv_over_time/{seed}": wandb.Image(str(analysis_dir / f"{filename_time}.png"))
                     })
                     plt.close()
                 
@@ -939,7 +938,7 @@ def plot_cv_over_time(
                     save_plot_dual_format(str(analysis_dir), filename_histogram, dpi=300, bbox_inches="tight")
                     logger.info(f"CV histogram plot saved to {analysis_dir}")
                     wandb.log({
-                        f"cv_histogram_{seed}": wandb.Image(str(analysis_dir / f"{filename_histogram}.png"))
+                        f"cv_histogram/{seed}": wandb.Image(str(analysis_dir / f"{filename_histogram}.png"))
                     })
                     plt.close()
                 

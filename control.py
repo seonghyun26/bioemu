@@ -1485,7 +1485,7 @@ def main(cfg):
         
         # Prepare logging data
         log_data = {
-            "train_loss": total_loss/num_batches,
+            "loss": total_loss/num_batches,
             "lr": optimizer.param_groups[0]['lr'],
             "epoch": epoch,
         }
