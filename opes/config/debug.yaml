@@ -12,6 +12,6 @@ opes:
   ntomp: 1
 analysis:
   gmx: False
-  skip_steps: 1
-  unit_steps: 0
+  skip_steps: 10
+  unit_steps: 10
   equil_temp: 360
