@@ -19,8 +19,9 @@ if __name__ == "__main__":
     # args = parser.parse_args()
     
     # molecule_list = ["CLN025","2JOF","2F4K","1FME","GTT","NTL9"]
-    method_list = ["tda","tica","tae","vde", "ours"]
-    molecule_list = ["1FME"]
+    # method_list = ["tda","tica","tae","vde", "ours"]
+    method_list = ["ours"]
+    molecule_list = ["CLN025"]
     
     device = "cuda:0"
     
@@ -33,10 +34,9 @@ if __name__ == "__main__":
                 mlcv_model.eval()
             else:
                 model_ckpt_mapping = {
+                    "CLN025": "0914_094907",
                     "2JOF": "0814_073849",
-                    # "2F4K": "0819_173704",
                     "1FME": "0904_160804",
-                    "NTL9": "0905_054344",
                     "GTT": "0905_160702",
                 }
                 mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/{model_ckpt_mapping[molecule]}-{molecule}-jit.pt", map_location=device)
@@ -49,41 +49,6 @@ if __name__ == "__main__":
             if os.path.exists(mlcv_save_path):
                 print(f"> CV values already computed at {mlcv_save_path}")
                 cv = np.load(mlcv_save_path)
-                print(f"> CV shape: {cv.shape}")
-                print(f"> CV range: [{cv.min():.6f}, {cv.max():.6f}]")
-                print(f"> CV mean: {cv.mean():.6f}, std: {cv.std():.6f}")
-                
-                plt.figure(figsize=(5, 4))
-                plt.hist(cv, bins=50, alpha=0.7, color='skyblue', edgecolor='black')
-                plt.xlabel("CV")
-                plt.grid(True, alpha=0.3)
-                plt.tight_layout()
-                save_path_normal = f"./temp/cv_histogram_{method}_{molecule}.png"
-                plt.savefig(save_path_normal, dpi=300, bbox_inches="tight")
-                plt.close()
-                
-                plt.figure(figsize=(5, 4))
-                plt.hist(cv, bins=50, alpha=0.7, color='skyblue', edgecolor='black', log=True)
-                plt.xlabel("CV")
-                plt.grid(True, alpha=0.3)
-                plt.tight_layout()
-                save_path_log = f"./temp/cv_histogram_{method}_{molecule}_log.png"
-                plt.savefig(save_path_log, dpi=300, bbox_inches="tight")
-                plt.close()
-                                
-                wandb.init(
-                    project="cv-analysis",
-                    name=f"{method}-{molecule}",
-                )
-                wandb.log({
-                    "molecule": molecule,
-                    "method": method,
-                    "cv/histogram": wandb.Image(save_path_normal),
-                    "cv/histogram(log)": wandb.Image(save_path_log),
-                    "cv/mean": cv.mean(),
-                    "cv/std": cv.std(),
-                })
-                wandb.finish()
             
             else:
                 projection_data_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-cad.pt"
@@ -114,10 +79,41 @@ if __name__ == "__main__":
                         cv_batches[start_idx:end_idx] = batch_cv
                 
                 cv = cv_batches.detach().cpu().numpy()
-                print(f"\nMethod: {method}, Molecule: {molecule}")
-                print(f"CV shape: {cv.shape}")
-                print(f"CV range: [{cv.min():.6f}, {cv.max():.6f}]")
-                print(f"CV mean: {cv.mean():.6f}, std: {cv.std():.6f}")
-                
                 np.save(mlcv_save_path, cv)
                 print(f"Saved CV values to {mlcv_save_path}")
+                
+            print(f"> CV shape: {cv.shape}")
+            print(f"> CV range: [{cv.min():.6f}, {cv.max():.6f}]")
+            print(f"> CV mean: {cv.mean():.6f}, std: {cv.std():.6f}")
+            
+            plt.figure(figsize=(5, 4))
+            plt.hist(cv, bins=50, alpha=0.7, color='skyblue', edgecolor='black')
+            plt.xlabel("CV")
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            save_path_normal = f"./temp/cv_histogram_{method}_{molecule}.png"
+            plt.savefig(save_path_normal, dpi=300, bbox_inches="tight")
+            plt.close()
+            
+            plt.figure(figsize=(5, 4))
+            plt.hist(cv, bins=50, alpha=0.7, color='skyblue', edgecolor='black', log=True)
+            plt.xlabel("CV")
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            save_path_log = f"./temp/cv_histogram_{method}_{molecule}_log.png"
+            plt.savefig(save_path_log, dpi=300, bbox_inches="tight")
+            plt.close()
+                            
+            wandb.init(
+                project="cv-analysis",
+                name=f"{method}-{molecule}",
+            )
+            wandb.log({
+                "molecule": molecule,
+                "method": method,
+                "cv/histogram": wandb.Image(save_path_normal),
+                "cv/histogram(log)": wandb.Image(save_path_log),
+                "cv/mean": cv.mean(),
+                "cv/std": cv.std(),
+            })
+            wandb.finish()

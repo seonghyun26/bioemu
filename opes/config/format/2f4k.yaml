@@ -10,6 +10,7 @@ opes:
   sigma: 0.05
   max_seed: 3
 analysis:
+  gmx: False
   skip_steps: 50000
   unit_steps: 25000
   equil_temp: 325

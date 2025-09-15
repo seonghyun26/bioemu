@@ -198,7 +198,8 @@ def load_model_and_data(
     model_root_path = "/home/shpark/prj-mlcv/lib/bioemu/opes/model/_baseline_"
     if model_type == "ours":
         if molecule == "CLN025":
-            date = date or "0816_171833"
+            # date = date or "0816_171833"
+            date = date or "0914_094907"
         
         elif molecule == "2JOF":
             date = date or "0814_073849"
@@ -207,7 +208,7 @@ def load_model_and_data(
             date = date or "0819_173704"
             
         elif molecule == "1FME":
-            date = date or "0904_160804"
+            date = date or "0914_150513"
         
         elif molecule == "GTT":
             date = date or "0905_160702"
@@ -1139,13 +1140,12 @@ def plot_rmsd_analysis(
         #     verticalalignment='top', fontsize=10
         # )
         # ax.set_title(f"CV {cv_dim} vs RMSD to folded state - {model_type.upper()}")
-        ax.set_xticks([0.00, 0.25, 0.50, 0.75, 1.00])
+        # ax.set_xticks([0.00, 0.25, 0.50, 0.75, 1.00])
+        ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=4))
         ax.set_xlabel(f"RMSD", fontsize=FONTSIZE_SMALL)
         if model_type == "tda":
             ax.set_ylabel(f"CV", fontsize=FONTSIZE_SMALL)
             ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
-        
-        # Apply consistent formatting
         format_plot_axes(
             ax, fig=fig, 
             model_type=model_type, 
