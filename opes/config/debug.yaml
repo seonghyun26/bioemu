@@ -1,7 +1,7 @@
-molecule: cln025
+molecule: 1fme
 method: tae
 ckpt_dir: _baseline_
-ckpt_path: tae-CLN025
+ckpt_path: tae-1FME
 date: debug
 tags: ['opes']
 start_gpu: 0
