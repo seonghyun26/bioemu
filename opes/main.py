@@ -167,7 +167,7 @@ class OPESSimulationRunner:
             "-bonded", "gpu",
             "-nb", "gpu",
             "-pme", "gpu",
-            "-pin", "on",
+            # "-pin", "on",
             "-pinoffset", str(gpu_id * ntomp_num),
             # "-dlb", "no"
             # "-tunepme",
