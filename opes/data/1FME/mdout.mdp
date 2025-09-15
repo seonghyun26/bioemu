@@ -2,7 +2,7 @@
 ;	File 'mdout.mdp' was generated
 ;	By user: unknown (0)
 ;	On host: 69957097b7c9
-;	At date: Wed Sep 10 07:53:12 2025
+;	At date: Mon Sep 15 00:44:57 2025
 ;
 ;	Created by:
 ;	              :-) GROMACS - gmx grompp, 2024.3-plumed_2.10b (-:
@@ -11,7 +11,7 @@
 ;	Data prefix:  /gromacs/AVX2_256_ts
 ;	Working dir:  /bioemu/opes/data/1FME
 ;	Command line:
-;	  gmx grompp -f 1fme_md.mdp -c npt.gro -t npt.cpt -p topol.top -o md.tpr
+;	  gmx grompp -f 1fme_md.mdp -c protein_processed.gro -p protein.top -o protein.tpr -maxwarn 1
 
 ; VARIOUS PREPROCESSING OPTIONS
 ; Preprocessor information: use cpp syntax.
@@ -142,10 +142,10 @@ nsttcouple               = -1
 nh-chain-length          = 10
 print-nose-hoover-chain-variables = no
 ; Groups to couple separately
-tc-grps                  = Protein Non-Protein
+tc-grps                  = Protein
 ; Time constant (ps) and reference temperature (K)
-tau_t                    = 0.1     0.1
-ref_t                    = 325     325
+tau_t                    = 0.1
+ref_t                    = 325
 ; pressure coupling     
 pcoupl                   = Parrinello-Rahman
 pcoupltype               = isotropic
@@ -175,7 +175,7 @@ annealing-temp           =
 ; GENERATE VELOCITIES FOR STARTUP RUN
 gen_vel                  = no
 gen-temp                 = 300
-gen-seed                 = -25165985
+gen-seed                 = -167811489
 
 ; OPTIONS FOR BONDS    
 constraints              = h-bonds
