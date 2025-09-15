@@ -1,7 +1,7 @@
 molecule: 1fme
 method: ours
 ckpt_dir: .
-ckpt_path: 0904_160804-1FME
+ckpt_path: 0914150513-1FME
 date: debug
 tags: ['opes']
 start_gpu: 0

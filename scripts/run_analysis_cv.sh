@@ -41,7 +41,7 @@ if [ ! -f "$PYTHON_SCRIPT" ]; then
 fi
 
 # Build command
-CMD="CUDA_VISIBLE_DEVICES=$1 python3 $PYTHON_SCRIPT --model_type $MODEL_TYPE --molecule $MOLECULE --img_dir $IMG_DIR"
+CMD="CUDA_VISIBLE_DEVICES=$1 python3 $PYTHON_SCRIPT --model_type $MODEL_TYPE --molecule $MOLECULE --img_dir $IMG_DIR --plot_3d True"
 
 # Add date parameter if provided
 if [ -n "$DATE" ]; then
