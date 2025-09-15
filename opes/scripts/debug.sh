@@ -20,7 +20,7 @@ python main.py \
 wait 
 
 python analysis_opes.py \
-    --config-name debug \
+    --config-name $method-$molecule \
     date=$date \
     +tags=['debug'] \
     opes.max_seed=$max_seed \
