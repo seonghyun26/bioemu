@@ -169,8 +169,8 @@ class OPESSimulationRunner:
             "-pme", "gpu",
             "-pin", "on",
             "-pinoffset", str(gpu_id * ntomp_num),
-            "-pinstride", "1",
-            "-tunepme",
+            # "-pinstride", "1",
+            # "-tunepme",
             # "-dlb", "no"
             # "-update", "gpu",
         ]
