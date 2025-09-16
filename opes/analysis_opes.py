@@ -650,7 +650,7 @@ def plot_free_energy_curve(
             mask = ~np.isnan(delta_f)
             if np.any(mask):
                 ax.plot(
-                    time_axis[mask], delta_f[mask],
+                    all_times[idx][mask], delta_f[mask],
                     color=blue, linewidth=2, alpha=0.2,
                     label=f"OPES {idx}",
                     zorder=2
