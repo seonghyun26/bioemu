@@ -615,6 +615,8 @@ def plot_free_energy_curve(
         valid_values = np.where(has_data, all_delta_fs_padded, np.nan)
         mean_delta_fs = np.nanmean(valid_values, axis=0)
         std_delta_fs  = np.nanstd(valid_values,  axis=0)
+        print(f"Mean delta F: {mean_delta_fs}")
+        print(f"Std delta F: {std_delta_fs}")
         
         # Compute reference Delta F
         print(f"> Computing reference Delta F")
