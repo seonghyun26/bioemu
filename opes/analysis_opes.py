@@ -491,7 +491,6 @@ def plot_pmf(
         ax.fill_between(
             cv_grid, mean_pmf - std_pmf, mean_pmf + std_pmf,
             alpha=0.2, color=blue, linewidth=1,
-            zorder=4,
         )
         for idx, pmf in enumerate(all_pmfs):
             ax.plot(
@@ -603,8 +602,12 @@ def plot_free_energy_curve(
             all_delta_fs_padded[i, :len(x)] = x
         idx_longest = int(np.argmax([len(t) for t in all_times]))
         time_axis = all_times[idx_longest]
-        mean_delta_fs = np.nanmean(all_delta_fs_padded, axis=0)
-        std_delta_fs  = np.nanstd(all_delta_fs_padded,  axis=0)
+        
+        # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
+        has_data = (~np.isnan(all_delta_fs_padded)) & (~np.isinf(all_delta_fs_padded))
+        valid_values = np.where(has_data, all_delta_fs_padded, np.nan)
+        mean_delta_fs = np.nanmean(valid_values, axis=0)
+        std_delta_fs  = np.nanstd(valid_values,  axis=0)
         
         # Compute reference Delta F
         print(f"> Computing reference Delta F")
@@ -629,7 +632,6 @@ def plot_free_energy_curve(
             ax.fill_between(
                 [0, time_axis[-1]], reference_Delta_F - 4, reference_Delta_F + 4,
                 color=COLORS[1], alpha=0.2,
-                zorder=6
             )
         mask = ~np.isnan(mean_delta_fs)
         if np.any(mask):
@@ -643,7 +645,6 @@ def plot_free_energy_curve(
                 mean_delta_fs[mask] - std_delta_fs[mask],
                 mean_delta_fs[mask] + std_delta_fs[mask],
                 alpha=0.2, color=blue, linewidth=1,
-                zorder=4
             )
         for idx, delta_f in enumerate(all_delta_fs):
             mask = ~np.isnan(delta_f)
