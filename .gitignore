@@ -154,4 +154,5 @@ cython_debug/
 *!model/_baseline_/*
 */test/*
 
-opes/data/charm27.ff
+*charm27.ff*
+*download*

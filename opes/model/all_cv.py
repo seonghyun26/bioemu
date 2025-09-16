@@ -2,15 +2,34 @@ import torch
 import numpy as np
 import argparse
 import wandb
+import mdtraj as md
 
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 from matplotlib import pyplot as plt
+from itertools import combinations
 
 from omegaconf import OmegaConf
 from pathlib import Path
 import os
 
+
+def safe_save_npy(
+    path: str | Path,
+    array: np.ndarray,
+):
+    path = Path(path)
+    if path.exists():
+        # Rename the existing file
+        backup = path.with_suffix(path.suffix + ".bak")
+        i = 1
+        while backup.exists():
+            backup = path.with_suffix(path.suffix + f".bak{i}")
+            i += 1
+        path.rename(backup)
+        print(f"Existing file renamed to {backup}")
+    np.save(path, array)
+    print(f"Array saved to {path}")
 
 if __name__ == "__main__":
     # parser = argparse.ArgumentParser()
@@ -18,10 +37,10 @@ if __name__ == "__main__":
     # parser.add_argument("--molecule", type=str, default="2JOF")
     # args = parser.parse_args()
     
-    # molecule_list = ["CLN025","2JOF","2F4K","1FME","GTT","NTL9"]
-    # method_list = ["tda","tica","tae","vde", "ours"]
-    method_list = ["ours"]
-    molecule_list = ["CLN025"]
+    # method_list = ["vde"]
+    # molecule_list = ["CLN025"]
+    method_list = ["tica", "tae", "vde",]
+    molecule_list = ["CLN025","2JOF","1FME","GTT"]
     
     device = "cuda:0"
     
@@ -42,11 +61,12 @@ if __name__ == "__main__":
                 mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/{model_ckpt_mapping[molecule]}-{molecule}-jit.pt", map_location=device)
                 mlcv_model.eval()
             
-            dataset_dir = Path(f"/home/shpark/prj-mlcv/lib/bioemu/opes/{molecule.upper()}")
+            dataset_dir = Path(f"/home/shpark/prj-mlcv/lib/bioemu/opes/data/{molecule.upper()}")
             dataset_dir.mkdir(parents=True, exist_ok=True)
             mlcv_save_path = dataset_dir / f"{method}_mlcv.npy"
             
-            if os.path.exists(mlcv_save_path):
+            # if os.path.exists(mlcv_save_path):
+            if False:
                 print(f"> CV values already computed at {mlcv_save_path}")
                 cv = np.load(mlcv_save_path)
             
@@ -77,9 +97,21 @@ if __name__ == "__main__":
                         start_idx = batch_idx * batch_size_eval
                         end_idx = start_idx + batch_cv.shape[0]  # Handle last batch size correctly
                         cv_batches[start_idx:end_idx] = batch_cv
+                        
+                reference_frame_path = f"/home/shpark/prj-mlcv/lib/bioemu/opes/data/{molecule}/folded.pdb"
+                ref_traj = md.load_pdb(reference_frame_path)
+                ca_resid_pair = np.array(
+                    [(a.index, b.index) for a, b in combinations(list(ref_traj.topology.residues), 2)]
+                )
+                ref_distances, _ = md.compute_contacts(
+                    ref_traj, scheme="ca", contacts=ca_resid_pair, periodic=False
+                )
+                reference_frame_cv = mlcv_model(torch.from_numpy(ref_distances).to(device)).item()
+                if reference_frame_cv < 0:
+                    cv_batches = -cv_batches
                 
                 cv = cv_batches.detach().cpu().numpy()
-                np.save(mlcv_save_path, cv)
+                safe_save_npy(mlcv_save_path, cv)
                 print(f"Saved CV values to {mlcv_save_path}")
                 
             print(f"> CV shape: {cv.shape}")
