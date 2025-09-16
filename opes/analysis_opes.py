@@ -396,7 +396,7 @@ def plot_pmf(
     analysis_dir: Path,
     reference_cvs: np.ndarray,
 ):
-    equil_temp = 340
+    equil_temp = cfg.analysis.equil_temp
     filename = "pmf"
     if check_image_exists(str(analysis_dir), filename):
         print(f"✓ PMF plot already exists: {filename}")
@@ -479,22 +479,26 @@ def plot_pmf(
         ax = fig.add_subplot(111)
         ax.plot(
             cv_grid, reference_pmf,
-            color=COLORS[1], linewidth=4, linestyle="--",
+            color=COLORS[1], linewidth=2, linestyle="--",
             label="Reference",
+            zorder=6,
         )
         ax.plot(
             cv_grid, mean_pmf,
             color=blue, linewidth=4,
+            zorder=4,
         )
         ax.fill_between(
             cv_grid, mean_pmf - std_pmf, mean_pmf + std_pmf,
-            alpha=0.2, color=blue, linewidth=1
+            alpha=0.2, color=blue, linewidth=1,
+            zorder=4,
         )
         for idx, pmf in enumerate(all_pmfs):
             ax.plot(
                 cv_grid, pmf,
                 color=blue, linewidth=2, alpha=0.2,
-                label=f"OPES {idx}"
+                label=f"OPES {idx}",
+                zorder=2,
             )
         ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
         ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
@@ -594,18 +598,13 @@ def plot_free_energy_curve(
         # Compute mean and std of delta F
         print(f"> Computing mean and std of delta F")
         max_len = max([len(x) for x in all_delta_fs])
-        padded = np.full((len(all_delta_fs), max_len), np.nan, dtype=float)
+        all_delta_fs_padded = np.full((len(all_delta_fs), max_len), np.nan, dtype=float)
         for i, x in enumerate(all_delta_fs):
-            padded[i, :len(x)] = x
+            all_delta_fs_padded[i, :len(x)] = x
         idx_longest = int(np.argmax([len(t) for t in all_times]))
         time_axis = all_times[idx_longest]
-        all_delta_fs = padded
-        
-        # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
-        has_data = (~np.isnan(all_delta_fs)) & (~np.isinf(all_delta_fs))
-        valid_values = padded * has_data.astype(float)
-        mean_delta_fs = np.nanmean(valid_values, axis=0)
-        std_delta_fs  = np.nanstd(valid_values,  axis=0)
+        mean_delta_fs = np.nanmean(all_delta_fs_padded, axis=0)
+        std_delta_fs  = np.nanstd(all_delta_fs_padded,  axis=0)
         
         # Compute reference Delta F
         print(f"> Computing reference Delta F")
@@ -624,23 +623,27 @@ def plot_free_energy_curve(
         if reference_Delta_F is not None and not np.isnan(reference_Delta_F):
             ax.axhline(
                 y=reference_Delta_F, color=COLORS[1], linestyle='--', 
-                label='Reference', linewidth=4
+                label='Reference', linewidth=4,
+                zorder=6
             )
             ax.fill_between(
                 [0, time_axis[-1]], reference_Delta_F - 4, reference_Delta_F + 4,
-                color=COLORS[1], alpha=0.2
+                color=COLORS[1], alpha=0.2,
+                zorder=6
             )
         mask = ~np.isnan(mean_delta_fs)
         if np.any(mask):
             ax.plot(
                 time_axis[mask], mean_delta_fs[mask], 
-                color=blue, linewidth=4
+                color=blue, linewidth=4,
+                zorder=4
             )
             ax.fill_between(
                 time_axis[mask], 
                 mean_delta_fs[mask] - std_delta_fs[mask],
                 mean_delta_fs[mask] + std_delta_fs[mask],
-                alpha=0.2, color=blue, linewidth=1
+                alpha=0.2, color=blue, linewidth=1,
+                zorder=4
             )
         for idx, delta_f in enumerate(all_delta_fs):
             mask = ~np.isnan(delta_f)
@@ -648,7 +651,8 @@ def plot_free_energy_curve(
                 ax.plot(
                     time_axis[mask], delta_f[mask],
                     color=blue, linewidth=2, alpha=0.2,
-                    label=f"OPES {idx}"
+                    label=f"OPES {idx}",
+                    zorder=2
                 )
         ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
         if cfg.molecule == "cln025":

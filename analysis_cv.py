@@ -714,10 +714,7 @@ def plot_tica_cv_analysis(
             ax.set_xlabel("TIC 1", fontsize=FONTSIZE_SMALL)
             if model_type == "tda":
                 ax.set_ylabel("TIC 2", fontsize=FONTSIZE_SMALL)
-            # if molecule == "CLN025":
-            #     ax.set_xticks([-2, -1, 0])
-            #     if model_type == "tda":
-            #         ax.set_yticks([-6, -4, -2, 0, 2])
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True, nbins=4))
             
             # Apply consistent formatting
             format_plot_axes(
@@ -737,11 +734,13 @@ def plot_tica_cv_analysis(
         filename_3d = f"tica3d-cv{cv_dim}-{model_type}"
         if date:
             filename_3d += f"_{date}"
-        if check_image_exists(img_dir, filename_3d) or not plot_3d:
+        if check_image_exists(img_dir, filename_3d):
             print(f"> Skipping {filename_3d}.png - already exists")
             wandb.log({
                 filename_3d: wandb.Image(str(f"{img_dir}/{filename_3d}.png"))
             })
+        elif plot_3d:
+            print(f"> Skipping TICA-CV 3D scatter plot for {model_type} {molecule}")
         else:
             print(f"> Plotting TICA-CV 3D scatter plot for {model_type} {molecule}")
             z = cv[:, cv_dim]
@@ -1769,12 +1768,13 @@ def analyze_correlations(
 # MAIN
 def main():
     parser = argparse.ArgumentParser(description='Run CV analysis for different model types')
-    parser.add_argument('--model_type', choices=['ours', 'tda', 'tica', 'tae', 'vde', 'all'], default='all', help='Model type to analyze')
+    parser.add_argument('--model_type', choices=['ours', 'tda', 'tica', 'tae', 'vde', 'partial', 'all'], default='all', help='Model type to analyze')
     parser.add_argument('--molecule', choices=['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9', 'partial','all'], default='CLN025', help='Molecule to analyze')
     parser.add_argument('--date', type=str, default=None, help='Date string for MLCV model (only used for mlcv)')
     parser.add_argument('--img_dir', type=str, default='/home/shpark/prj-mlcv/lib/bioemu/img/debug', help='Directory to save images')
     parser.add_argument('--cuda_device', type=int, default=None, help='CUDA device ID to use (e.g., 0, 1). If not specified, auto-detect available device')
     parser.add_argument('--plot_3d', type=bool, default=False, help='Plot 3D scatter plot')
+    parser.add_argument('--overwrite', type=bool, default=False, help='Overwrite existing plots')
     # parser.add_argument('--dssp_analysis', type=bool, default=False, help='Perform DSSP analysis')
     args = parser.parse_args()
     
@@ -1786,9 +1786,10 @@ def main():
     
     # Create image directory if it doesn't exist
     os.makedirs(args.img_dir, exist_ok=True)
+    # model_types = ['tica', 'tae', 'vde'] if args.model_type == 'partial' else [args.model_type]
     model_types = ['ours', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
     if args.molecule == 'partial':
-        molecules = ['1FME', '2F4K', 'GTT', 'NTL9']
+        molecules = ['CLN025', '2JOF', '1FME', 'GTT']
     elif args.molecule == 'all':
         molecules = ['CLN025', '2JOF', '2F4K', '1FME', 'GTT', 'NTL9']
     else:
@@ -1838,7 +1839,8 @@ def main():
                 # plot_cv_histogram(cv, model_type, molecule, img_dir_mol, args.date)
                 
                 # Compute TICA coordinates
-                tica_coord_path = f"./opes/data/{molecule.upper()}/tica_lag10_coord.npy"
+                lag = 1000 if molecule == "1FME" else 10
+                tica_coord_path = f"./opes/data/{molecule.upper()}/tica_lag{lag}_coord.npy"
                 if os.path.exists(tica_coord_path):
                     print(f"> Using cached TICA coordinates from {tica_coord_path}")
                     tica_data = np.load(tica_coord_path)
