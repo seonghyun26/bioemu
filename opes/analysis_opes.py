@@ -811,16 +811,17 @@ def plot_tica_scatter(
     
         else:
             try:
+                lag = 1000 if cfg.molecule == "1fme" else 10
                 # Load TICA model
                 if cfg.molecule == "cln025":
-                    tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_switch_lag10.pkl"
+                    tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_switch_lag{lag}.pkl"
                 else:
-                    tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_lag10.pkl"
+                    tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_lag{lag}.pkl"
                 with open(tica_model_path, 'rb') as f:
                     tica_model = pickle.load(f)
                 
                 # Load coordinates for background
-                tica_coord_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_coord_lag10.npy"
+                tica_coord_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_coord_lag{lag}.npy"
                 if Path(tica_coord_path).exists():
                     tica_coord_full = np.load(tica_coord_path)
                 else:
