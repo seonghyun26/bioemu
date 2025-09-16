@@ -180,9 +180,9 @@ def save_plot_dual_format(
     pdf_path = os.path.join(img_dir, f"pdf/{filename}.pdf")
     
     # Check if both files already exist
-    if check_image_exists(img_dir, filename):
-        print(f"> Skipping {filename} - both PNG and PDF already exist")
-        return False
+    # if check_image_exists(img_dir, filename):
+    #     print(f"> Skipping {filename} - both PNG and PDF already exist")
+    #     return False
     
     # Save in both formats
     try:
@@ -396,133 +396,133 @@ def plot_pmf(
     analysis_dir: Path,
     reference_cvs: np.ndarray,
 ):
+    print(f"> Computing PMF")
     equil_temp = cfg.analysis.equil_temp
     filename = "pmf"
-    if check_image_exists(str(analysis_dir), filename):
-        print(f"✓ PMF plot already exists: {filename}")
-        wandb.log({
-            "pmf": wandb.Image(str(analysis_dir / f"{filename}.png")),
-        })
-        return
+    # if check_image_exists(str(analysis_dir), filename):
+    #     print(f"✓ PMF plot already exists: {filename}")
+    #     wandb.log({
+    #         "pmf": wandb.Image(str(analysis_dir / f"{filename}.png")),
+    #     })
+    #     return
     
-    else:
-        print(f"> Computing PMF")
-        
-        all_cv_grids = []
-        all_pmfs = []
-        
-        # Check CV range
-        print(f"> Computing OPES PMF CVs range")
-        cv_mins = []
-        cv_maxs = []
-        pbar = tqdm(
-            range(max_seed + 1),
-            desc="Checking CV range"
-        )
-        for seed in pbar:
-            colvar_file = log_dir / f"{seed}" / "COLVAR"
-            if not colvar_file.exists():
-                logger.warning(f"COLVAR file not found: {colvar_file}")
-                continue
-            colvar_data = np.genfromtxt(colvar_file, skip_header=1)
-            cv = colvar_data[:, 1]
-            cv_grid = np.arange(cv.min(), cv.max() + sigma / 2, sigma)
-            all_cv_grids.append(cv_grid)
-            cv_mins.append(cv.min())
-            cv_maxs.append(cv.max())
-        cv_grid_min = np.min(cv_mins) if len(cv_mins) > 0 else 0.0
-        cv_grid_max = np.max(cv_maxs) if len(cv_maxs) > 0 else 0.0
-        cv_grid_min = min(cv_grid_min, -1.0)
-        cv_grid_max = max(cv_grid_max, 1.0)
-        cv_grid = np.arange(cv_grid_min - sigma / 2, cv_grid_max + sigma / 2, sigma)
-        
-        # Compute PMF
-        pbar = tqdm(
-            range(max_seed + 1),
-            desc="Computing OPES PMF"
-        )
-        for seed in pbar:
-            colvar_file = log_dir / f"{seed}" / "COLVAR"
-            colvar_data = np.genfromtxt(colvar_file, skip_header=1)
-            cv = colvar_data[:, 1]
-            bias = colvar_data[:, 2]
-            beta = 1.0 / (R * equil_temp)
-            W = np.exp(beta * bias)  
-            pmf, _ = mbar.pmf_from_weights(
-                cv_grid,
-                cv,
-                W,
-                equil_temp=equil_temp
-            )
-            pmf -= pmf.min()
-            all_pmfs.append(pmf)
-        all_pmfs = np.array(all_pmfs)
-        mean_pmf = np.mean(all_pmfs, axis=0)
-        std_pmf = np.std(all_pmfs, axis=0)
-        
-        # Compute reference PMF
-        print(f"> Computing reference PMF")
-        reference_pmf, _ = mbar.pmf_from_weights(
+    # else:
+    
+    all_cv_grids = []
+    all_pmfs = []
+    
+    # Check CV range
+    print(f"> Computing OPES PMF CVs range")
+    cv_mins = []
+    cv_maxs = []
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Checking CV range"
+    )
+    for seed in pbar:
+        colvar_file = log_dir / f"{seed}" / "COLVAR"
+        if not colvar_file.exists():
+            logger.warning(f"COLVAR file not found: {colvar_file}")
+            continue
+        colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+        cv = colvar_data[:, 1]
+        cv_grid = np.arange(cv.min(), cv.max() + sigma / 2, sigma)
+        all_cv_grids.append(cv_grid)
+        cv_mins.append(cv.min())
+        cv_maxs.append(cv.max())
+    cv_grid_min = np.min(cv_mins) if len(cv_mins) > 0 else 0.0
+    cv_grid_max = np.max(cv_maxs) if len(cv_maxs) > 0 else 0.0
+    cv_grid_min = min(cv_grid_min, -1.0)
+    cv_grid_max = max(cv_grid_max, 1.0)
+    cv_grid = np.arange(cv_grid_min - sigma / 2, cv_grid_max + sigma / 2, sigma)
+    
+    # Compute PMF
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Computing OPES PMF"
+    )
+    for seed in pbar:
+        colvar_file = log_dir / f"{seed}" / "COLVAR"
+        colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+        cv = colvar_data[:, 1]
+        bias = colvar_data[:, 2]
+        beta = 1.0 / (R * equil_temp)
+        W = np.exp(beta * bias)  
+        pmf, _ = mbar.pmf_from_weights(
             cv_grid,
-            reference_cvs,
-            weights=np.ones_like(reference_cvs),
+            cv,
+            W,
             equil_temp=equil_temp
         )
-        reference_pmf -= reference_pmf.min()
-        reference_mask = ~np.isnan(reference_pmf)
-        mean_pmf_mask = ~np.isnan(mean_pmf)
-        pmf_mask = reference_mask & mean_pmf_mask
-        pmf_mae = np.mean(np.abs(mean_pmf[pmf_mask] - reference_pmf[pmf_mask]))
+        pmf -= pmf.min()
+        all_pmfs.append(pmf)
+    all_pmfs = np.array(all_pmfs)
+    mean_pmf = np.mean(all_pmfs, axis=0)
+    std_pmf = np.std(all_pmfs, axis=0)
+    
+    # Compute reference PMF
+    print(f"> Computing reference PMF")
+    reference_pmf, _ = mbar.pmf_from_weights(
+        cv_grid,
+        reference_cvs,
+        weights=np.ones_like(reference_cvs),
+        equil_temp=equil_temp
+    )
+    reference_pmf -= reference_pmf.min()
+    reference_mask = ~np.isnan(reference_pmf)
+    mean_pmf_mask = ~np.isnan(mean_pmf)
+    pmf_mask = reference_mask & mean_pmf_mask
+    pmf_mae = np.mean(np.abs(mean_pmf[pmf_mask] - reference_pmf[pmf_mask]))
 
-        print(f"> Plotting PMF")
-        fig = plt.figure(figsize=(6, 4))
-        ax = fig.add_subplot(111)
+    print(f"> Plotting PMF")
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(111)
+    ax.plot(
+        cv_grid, reference_pmf,
+        color=COLORS[1], linewidth=2, linestyle="--",
+        label="Reference",
+        zorder=6,
+    )
+    ax.plot(
+        cv_grid, mean_pmf,
+        color=blue, linewidth=4,
+        zorder=4,
+    )
+    ax.fill_between(
+        cv_grid, mean_pmf - std_pmf, mean_pmf + std_pmf,
+        alpha=0.2, color=blue, linewidth=1,
+    )
+    for idx, pmf in enumerate(all_pmfs):
         ax.plot(
-            cv_grid, reference_pmf,
-            color=COLORS[1], linewidth=2, linestyle="--",
-            label="Reference",
-            zorder=6,
+            cv_grid, pmf,
+            color=blue, linewidth=2, alpha=0.2,
+            label=f"OPES {idx}",
+            zorder=2,
         )
-        ax.plot(
-            cv_grid, mean_pmf,
-            color=blue, linewidth=4,
-            zorder=4,
-        )
-        ax.fill_between(
-            cv_grid, mean_pmf - std_pmf, mean_pmf + std_pmf,
-            alpha=0.2, color=blue, linewidth=1,
-        )
-        for idx, pmf in enumerate(all_pmfs):
-            ax.plot(
-                cv_grid, pmf,
-                color=blue, linewidth=2, alpha=0.2,
-                label=f"OPES {idx}",
-                zorder=2,
-            )
-        ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
-        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.tick_params(axis='both', labelsize=FONTSIZE_SMALL)
-        ax.set_xlabel("CV", fontsize=FONTSIZE_SMALL)
-        ax.set_ylabel("PMF [kJ/mol]", fontsize=FONTSIZE_SMALL)
-        plt.grid(True, alpha=0.3)
-        format_plot_axes(
-            ax, fig=fig, 
-            model_type=cfg.method, 
-            show_y_labels=True,
-            align_ylabels=True
-        )
-        save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
-        logger.info(f"PMF plot saved to {analysis_dir}")
-        wandb.log({
-            "pmf": wandb.Image(str(analysis_dir / f"{filename}.png")),
-            "pmf_mae": round(pmf_mae, 2),
-            "pmf_std": round(std_pmf[~np.isnan(std_pmf)].mean(), 2)
-        })
-        plt.close()
-        
-        return
+    ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
+    ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.tick_params(axis='both', labelsize=FONTSIZE_SMALL)
+    ax.set_xlabel("CV", fontsize=FONTSIZE_SMALL)
+    ax.set_ylabel("PMF [kJ/mol]", fontsize=FONTSIZE_SMALL)
+    plt.grid(True, alpha=0.3)
+    format_plot_axes(
+        ax, fig=fig, 
+        model_type=cfg.method, 
+        show_y_labels=True,
+        align_ylabels=True
+    )
+    save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
+    logger.info(f"PMF plot saved to {analysis_dir}")
+    wandb.log({
+        "pmf": wandb.Image(str(analysis_dir / f"{filename}.png")),
+        "pmf_mae": round(pmf_mae, 2),
+        "pmf_std": round(std_pmf[~np.isnan(std_pmf)].mean(), 2)
+    })
+    plt.close()
+    
+    return
 
 
 def plot_free_energy_curve(
@@ -533,173 +533,173 @@ def plot_free_energy_curve(
     reference_cvs: np.ndarray,
 ):
     filename = "free_energy_curve"
-    if check_image_exists(str(analysis_dir), filename):
-        print(f"✓ Free energy curve plot already exists: {filename}")
-        wandb.log({
-            "free_energy_curve": wandb.Image(str(analysis_dir / f"{filename}.png")),
-        })
-        return
+    # if check_image_exists(str(analysis_dir), filename):
+    #     print(f"✓ Free energy curve plot already exists: {filename}")
+    #     wandb.log({
+    #         "free_energy_curve": wandb.Image(str(analysis_dir / f"{filename}.png")),
+    #     })
+    #     return
     
-    else:
-        print(f"> Computing free energy curve")
-        # ns_per_step = 0.004
-        # skip_steps = 50000
-        skip_steps = cfg.analysis.skip_steps
-        unit_steps = cfg.analysis.unit_steps
-        equil_temp = cfg.analysis.equil_temp
-        all_times = []
-        all_cvs = []
-        all_delta_fs = []
-        
-        # Compute Delta F
-        print(f"> Computing Delta F")
-        pbar = tqdm(
-            range(max_seed + 1),
-            desc="Computing Delta F"
-        )
-        for seed in pbar:
-            colvar_file = log_dir / f"{seed}" / "COLVAR"
-            try:
-                colvar_data = np.genfromtxt(colvar_file, skip_header=1)
-                time = colvar_data[:, 0]
-                cv = colvar_data[:, 1]
-                bias = colvar_data[:, 2]
-                total_steps = len(colvar_data)
-                step_grid = np.arange(
-                    skip_steps + unit_steps, total_steps, unit_steps
+    # else:
+    print(f"> Computing free energy curve")
+    # ns_per_step = 0.004
+    # skip_steps = 50000
+    skip_steps = cfg.analysis.skip_steps
+    unit_steps = cfg.analysis.unit_steps
+    equil_temp = cfg.analysis.equil_temp
+    all_times = []
+    all_cvs = []
+    all_delta_fs = []
+    
+    # Compute Delta F
+    print(f"> Computing Delta F")
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Computing Delta F"
+    )
+    for seed in pbar:
+        colvar_file = log_dir / f"{seed}" / "COLVAR"
+        try:
+            colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+            time = colvar_data[:, 0]
+            cv = colvar_data[:, 1]
+            bias = colvar_data[:, 2]
+            total_steps = len(colvar_data)
+            step_grid = np.arange(
+                skip_steps + unit_steps, total_steps, unit_steps
+            )
+            cv_thresh = [
+                -2, 0, 2
+            ]
+            beta = 1.0 / (R * equil_temp)
+            W = np.exp(beta * bias)  
+            all_cvs.append(cv)
+            time_steps = time[step_grid] * 0.001
+            if time_steps.shape[0] == 0:
+                step_grid_without_skip_steps = np.arange(
+                    unit_steps, total_steps, unit_steps
                 )
-                cv_thresh = [
-                    -2, 0, 2
-                ]
-                beta = 1.0 / (R * equil_temp)
-                W = np.exp(beta * bias)  
-                all_cvs.append(cv)
-                time_steps = time[step_grid] * 0.001
-                if time_steps.shape[0] == 0:
-                    step_grid_without_skip_steps = np.arange(
-                        unit_steps, total_steps, unit_steps
-                    )
-                    time_steps = time[step_grid_without_skip_steps] * 0.001
-                all_times.append(time_steps)
-                
-                Delta_Fs = []
-                for current_step in tqdm(step_grid):
-                    cv_t = cv[skip_steps:current_step]
-                    W_t = W[skip_steps:current_step]
-                        
-                    Delta_F = DeltaF_fromweights(
-                        xi_traj=cv_t,
-                        weights=W_t,
-                        cv_thresh=cv_thresh,
-                        T=equil_temp,
-                    )
-                    Delta_Fs.append(Delta_F)
-                Delta_Fs = np.array(Delta_Fs)
-                all_delta_fs.append(Delta_Fs)
-                
-            except Exception as e:
-                logger.warning(f"Error processing data for seed {seed}: {e}")
-                continue
-        
-        # Compute mean and std of delta F
-        print(f"> Computing mean and std of delta F")
-        max_len = max([len(x) for x in all_delta_fs])
-        all_delta_fs_padded = np.full((len(all_delta_fs), max_len), np.nan, dtype=float)
-        for i, x in enumerate(all_delta_fs):
-            all_delta_fs_padded[i, :len(x)] = x
-        idx_longest = int(np.argmax([len(t) for t in all_times]))
-        time_axis = all_times[idx_longest]
-        
-        # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
-        has_data = (~np.isnan(all_delta_fs_padded)) & (~np.isinf(all_delta_fs_padded))
-        valid_values = np.where(has_data, all_delta_fs_padded, np.nan)
-        mean_delta_fs = np.nanmean(valid_values, axis=0)
-        std_delta_fs  = np.nanstd(valid_values,  axis=0)
-        print(f"Mean delta F: {mean_delta_fs}")
-        print(f"Std delta F: {std_delta_fs}")
-        
-        # Compute reference Delta F
-        print(f"> Computing reference Delta F")
-        reference_weights = np.ones_like(reference_cvs)
-        reference_cv_thresh = [reference_cvs.min(), (reference_cvs.min() + reference_cvs.max()) / 2, reference_cvs.max()]
-        reference_Delta_F = DeltaF_fromweights(
-            xi_traj=reference_cvs,
-            weights=reference_weights,
-            cv_thresh=reference_cv_thresh,
-            T=equil_temp,
+                time_steps = time[step_grid_without_skip_steps] * 0.001
+            all_times.append(time_steps)
+            
+            Delta_Fs = []
+            for current_step in tqdm(step_grid):
+                cv_t = cv[skip_steps:current_step]
+                W_t = W[skip_steps:current_step]
+                    
+                Delta_F = DeltaF_fromweights(
+                    xi_traj=cv_t,
+                    weights=W_t,
+                    cv_thresh=cv_thresh,
+                    T=equil_temp,
+                )
+                Delta_Fs.append(Delta_F)
+            Delta_Fs = np.array(Delta_Fs)
+            all_delta_fs.append(Delta_Fs)
+            
+        except Exception as e:
+            logger.warning(f"Error processing data for seed {seed}: {e}")
+            continue
+    
+    # Compute mean and std of delta F
+    print(f"> Computing mean and std of delta F")
+    max_len = max([len(x) for x in all_delta_fs])
+    all_delta_fs_padded = np.full((len(all_delta_fs), max_len), np.nan, dtype=float)
+    for i, x in enumerate(all_delta_fs):
+        all_delta_fs_padded[i, :len(x)] = x
+    idx_longest = int(np.argmax([len(t) for t in all_times]))
+    time_axis = all_times[idx_longest]
+    
+    # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
+    has_data = (~np.isnan(all_delta_fs_padded)) & (~np.isinf(all_delta_fs_padded))
+    valid_values = np.where(has_data, all_delta_fs_padded, np.nan)
+    mean_delta_fs = np.nanmean(valid_values, axis=0)
+    std_delta_fs  = np.nanstd(valid_values,  axis=0)
+    print(f"Mean delta F: {mean_delta_fs}")
+    print(f"Std delta F: {std_delta_fs}")
+    
+    # Compute reference Delta F
+    print(f"> Computing reference Delta F")
+    reference_weights = np.ones_like(reference_cvs)
+    reference_cv_thresh = [reference_cvs.min(), (reference_cvs.min() + reference_cvs.max()) / 2, reference_cvs.max()]
+    reference_Delta_F = DeltaF_fromweights(
+        xi_traj=reference_cvs,
+        weights=reference_weights,
+        cv_thresh=reference_cv_thresh,
+        T=equil_temp,
+    )
+    
+    # Plot
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(111)
+    if reference_Delta_F is not None and not np.isnan(reference_Delta_F):
+        ax.axhline(
+            y=reference_Delta_F, color=COLORS[1], linestyle='--', 
+            label='Reference', linewidth=4,
+            zorder=6
         )
-        
-        # Plot
-        fig = plt.figure(figsize=(6, 4))
-        ax = fig.add_subplot(111)
-        if reference_Delta_F is not None and not np.isnan(reference_Delta_F):
-            ax.axhline(
-                y=reference_Delta_F, color=COLORS[1], linestyle='--', 
-                label='Reference', linewidth=4,
-                zorder=6
-            )
-            ax.fill_between(
-                [0, time_axis[-1]], reference_Delta_F - 4, reference_Delta_F + 4,
-                color=COLORS[1], alpha=0.2,
-            )
-        mask = ~np.isnan(mean_delta_fs)
+        ax.fill_between(
+            [0, time_axis[-1]], reference_Delta_F - 4, reference_Delta_F + 4,
+            color=COLORS[1], alpha=0.2,
+        )
+    mask = ~np.isnan(mean_delta_fs)
+    if np.any(mask):
+        ax.plot(
+            time_axis[mask], mean_delta_fs[mask], 
+            color=blue, linewidth=4,
+            zorder=4
+        )
+        ax.fill_between(
+            time_axis[mask], 
+            mean_delta_fs[mask] - std_delta_fs[mask],
+            mean_delta_fs[mask] + std_delta_fs[mask],
+            alpha=0.2, color=blue, linewidth=1,
+        )
+    for idx, delta_f in enumerate(all_delta_fs):
+        mask = ~np.isnan(delta_f)
         if np.any(mask):
             ax.plot(
-                time_axis[mask], mean_delta_fs[mask], 
-                color=blue, linewidth=4,
-                zorder=4
+                all_times[idx][mask], delta_f[mask],
+                color=blue, linewidth=2, alpha=0.2,
+                label=f"OPES {idx}",
+                zorder=2
             )
-            ax.fill_between(
-                time_axis[mask], 
-                mean_delta_fs[mask] - std_delta_fs[mask],
-                mean_delta_fs[mask] + std_delta_fs[mask],
-                alpha=0.2, color=blue, linewidth=1,
-            )
-        for idx, delta_f in enumerate(all_delta_fs):
-            mask = ~np.isnan(delta_f)
-            if np.any(mask):
-                ax.plot(
-                    all_times[idx][mask], delta_f[mask],
-                    color=blue, linewidth=2, alpha=0.2,
-                    label=f"OPES {idx}",
-                    zorder=2
-                )
-        ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
-        if cfg.molecule == "cln025":
-            ax.set_yticks([-15, 0, 15, 30])
-        else:
-            ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
-        ax.set_xlim(0.0, time_axis[-1])
-        if cfg.molecule == "cln025":
-            ax.set_ylim(-20, 35)
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        plt.xticks(fontsize=FONTSIZE_SMALL)
-        plt.yticks(fontsize=FONTSIZE_SMALL)
-        plt.xlabel('Time [ns]', fontsize=FONTSIZE_SMALL)
-        plt.ylabel(r'$\Delta F$ [kJ/mol]', fontsize=FONTSIZE_SMALL)
-        format_plot_axes(
-            ax, fig=fig, 
-            model_type=cfg.method, 
-            show_y_labels=True,
-            align_ylabels=True
-        )
-        
-        # Logging
-        save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
-        logger.info(f"Free energy curve saved to {analysis_dir}")
-        log_info = {
-            "free_energy_curve": wandb.Image(str(analysis_dir / f"{filename}.png")),
-            "free_energy_difference": round(mean_delta_fs[-1], 2),
-            "free_energy_difference_std": round(std_delta_fs[-1], 2),
-            "free_energy_difference_reference": round(reference_Delta_F, 2),
-            "free_energy_difference_mae": round(np.abs(mean_delta_fs[-1] - reference_Delta_F), 2)
-        }
-        wandb.log(log_info)
-        logger.info(pformat(log_info, indent=4, width=120))
-        plt.close()
-        
-        return
+    ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
+    if cfg.molecule == "cln025":
+        ax.set_yticks([-15, 0, 15, 30])
+    else:
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
+    ax.set_xlim(0.0, time_axis[-1])
+    if cfg.molecule == "cln025":
+        ax.set_ylim(-20, 35)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.xticks(fontsize=FONTSIZE_SMALL)
+    plt.yticks(fontsize=FONTSIZE_SMALL)
+    plt.xlabel('Time [ns]', fontsize=FONTSIZE_SMALL)
+    plt.ylabel(r'$\Delta F$ [kJ/mol]', fontsize=FONTSIZE_SMALL)
+    format_plot_axes(
+        ax, fig=fig, 
+        model_type=cfg.method, 
+        show_y_labels=True,
+        align_ylabels=True
+    )
+    
+    # Logging
+    save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
+    logger.info(f"Free energy curve saved to {analysis_dir}")
+    log_info = {
+        "free_energy_curve": wandb.Image(str(analysis_dir / f"{filename}.png")),
+        "free_energy_difference": round(mean_delta_fs[-1], 2),
+        "free_energy_difference_std": round(std_delta_fs[-1], 2),
+        "free_energy_difference_reference": round(reference_Delta_F, 2),
+        "free_energy_difference_mae": round(np.abs(mean_delta_fs[-1] - reference_Delta_F), 2)
+    }
+    wandb.log(log_info)
+    logger.info(pformat(log_info, indent=4, width=120))
+    plt.close()
+    
+    return
 
 
 def plot_rmsd_analysis(
@@ -717,73 +717,73 @@ def plot_rmsd_analysis(
     )
     for seed in pbar:
         filename = f"rmsd_analysis_{seed}"
-        if check_image_exists(str(analysis_dir), filename):
-            print(f"✓ RMSD analysis plot already exists: {filename}")
-            wandb.log({
-                f"rsmd/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png")),
-            })
-            continue
+        # if check_image_exists(str(analysis_dir), filename):
+        #     print(f"✓ RMSD analysis plot already exists: {filename}")
+        #     wandb.log({
+        #         f"rsmd/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png")),
+        #     })
+        #     continue
         
-        else:
+        # else:
+        try:
+            ref_pdb_path = f"./data/{cfg.molecule.upper()}/folded.pdb"
+            ref_traj = md.load_pdb(ref_pdb_path)
+        
+            # Load trajectory and compute RMSD
+            traj_file = log_dir / "analysis" / f"{seed}_tc.xtc"
             try:
-                ref_pdb_path = f"./data/{cfg.molecule.upper()}/folded.pdb"
-                ref_traj = md.load_pdb(ref_pdb_path)
-            
-                # Load trajectory and compute RMSD
-                traj_file = log_dir / "analysis" / f"{seed}_tc.xtc"
-                try:
-                    traj = md.load_xtc(
-                        traj_file,
-                        top=ref_pdb_path,
-                    )
-                    traj.center_coordinates()
-                    rmsd_values = md.rmsd(
-                        traj,
-                        ref_traj,
-                        atom_indices = traj.topology.select("name CA")                        
-                    )
-                except Exception as e:
-                    logger.warning(f"Error processing trajectory for seed {seed}: {e}")
-                    continue
-            
-                # Load COLVAR data
-                colvar_file = log_dir / f"{seed}" / "COLVAR"
-                if not colvar_file.exists():
-                    logger.warning(f"COLVAR file not found: {colvar_file}")
-                    continue
-                traj_dat = np.genfromtxt(colvar_file, skip_header=1)
-                time = traj_dat[:, 0]
-                final_time = time[-1] / 1000
-                time_grid = np.linspace(0, final_time, num=len(rmsd_values))
-                
-                # Plot RMSD over time
-                fig = plt.figure(figsize=(5, 3))
-                ax = fig.add_subplot(111)
-                plt.plot(time_grid, rmsd_values, color=blue, linewidth=4, label='RMSD')
-                ax.set_xlabel('Time (ns)', fontsize=FONTSIZE_SMALL)
-                ax.set_ylabel('RMSD (nm)', fontsize=FONTSIZE_SMALL)
-                ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
-                format_plot_axes(
-                    ax, fig=fig, 
-                    model_type=cfg.method, 
-                    show_y_labels=(cfg.method == "tda"),
-                    align_ylabels=True
+                traj = md.load_xtc(
+                    traj_file,
+                    top=ref_pdb_path,
                 )
-                
-                # Save plot
-                save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
-                logger.info(f"RMSD analysis saved to {analysis_dir}")
-                wandb.log({
-                    f"rmsd/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png")),
-                    "max_rmsd": round(float(np.max(rmsd_values)), 2),
-                    "min_rmsd": round(float(np.min(rmsd_values)), 2)
-                })
-                
-                plt.close()
-        
+                traj.center_coordinates()
+                rmsd_values = md.rmsd(
+                    traj,
+                    ref_traj,
+                    atom_indices = traj.topology.select("name CA")                        
+                )
             except Exception as e:
-                logger.error(f"Error in RMSD analysis: {e}")
-                raise
+                logger.warning(f"Error processing trajectory for seed {seed}: {e}")
+                continue
+        
+            # Load COLVAR data
+            colvar_file = log_dir / f"{seed}" / "COLVAR"
+            if not colvar_file.exists():
+                logger.warning(f"COLVAR file not found: {colvar_file}")
+                continue
+            traj_dat = np.genfromtxt(colvar_file, skip_header=1)
+            time = traj_dat[:, 0]
+            final_time = time[-1] / 1000
+            time_grid = np.linspace(0, final_time, num=len(rmsd_values))
+            
+            # Plot RMSD over time
+            fig = plt.figure(figsize=(5, 3))
+            ax = fig.add_subplot(111)
+            plt.plot(time_grid, rmsd_values, color=blue, linewidth=4, label='RMSD')
+            ax.set_xlabel('Time (ns)', fontsize=FONTSIZE_SMALL)
+            ax.set_ylabel('RMSD (nm)', fontsize=FONTSIZE_SMALL)
+            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
+            format_plot_axes(
+                ax, fig=fig, 
+                model_type=cfg.method, 
+                show_y_labels=(cfg.method == "tda"),
+                align_ylabels=True
+            )
+            
+            # Save plot
+            save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
+            logger.info(f"RMSD analysis saved to {analysis_dir}")
+            wandb.log({
+                f"rmsd/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png")),
+                "max_rmsd": round(float(np.max(rmsd_values)), 2),
+                "min_rmsd": round(float(np.min(rmsd_values)), 2)
+            })
+            
+            plt.close()
+    
+        except Exception as e:
+            logger.error(f"Error in RMSD analysis: {e}")
+            raise
 
 
 def plot_tica_scatter(
@@ -802,87 +802,87 @@ def plot_tica_scatter(
     )
     for seed in pbar:
         filename = f"tica_scatter_{seed}"
-        if check_image_exists(str(analysis_dir), filename):
-            print(f"✓ TICA scatter plot already exists: {filename}")
+        # if check_image_exists(str(analysis_dir), filename):
+        #     print(f"✓ TICA scatter plot already exists: {filename}")
+        #     wandb.log({
+        #         f"tica/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png"))
+        #     })
+        #     continue
+    
+        # else:
+        try:
+            lag = 1000 if cfg.molecule == "1fme" else 10
+            # Load TICA model
+            if cfg.molecule == "cln025":
+                tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_switch_lag{lag}.pkl"
+            else:
+                tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_lag{lag}.pkl"
+            with open(tica_model_path, 'rb') as f:
+                tica_model = pickle.load(f)
+            
+            # Load coordinates for background
+            tica_coord_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_coord_lag{lag}.npy"
+            if Path(tica_coord_path).exists():
+                tica_coord_full = np.load(tica_coord_path)
+            else:
+                cad_full_path = f"./data/{cfg.molecule.upper()}/cad-switch.pt" if cfg.molecule == "cln025" else f"./data/{cfg.molecule.upper()}/cad.pt"
+                cad_full = torch.load(cad_full_path).numpy()
+                tica_coord_full = tica_model.transform(cad_full)
+        
+            # Load trajectory data
+            traj_file = analysis_dir / f"{seed}_tc.xtc"
+            if not traj_file.exists()   :
+                logger.warning(f"No trajectory file found for seed {seed}")
+                continue
+
+            # top_file = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_from_mae.pdb"
+            top_file = f"./data/{cfg.molecule.upper()}/folded.gro"
+            if not Path(top_file).exists():
+                logger.warning(f"Topology file not found: {top_file}")
+                continue
+            try:
+                traj = md.load(str(traj_file), top=top_file)
+                ca_resid_pair = np.array([(a.index, b.index) for a, b in combinations(list(traj.topology.residues), 2)])
+                ca_pair_contacts, _ = md.compute_contacts(traj, scheme="ca", contacts=ca_resid_pair, periodic=False)
+                if cfg.molecule == "cln025":
+                    ca_pair_contacts_switch = (1 - np.power(ca_pair_contacts / 0.8, 6)) / (1 - np.power(ca_pair_contacts / 0.8, 12))
+                    tica_coord = tica_model.transform(ca_pair_contacts_switch)
+                else:
+                    tica_coord = tica_model.transform(ca_pair_contacts)
+            except Exception as e:
+                logger.warning(f"Error processing trajectory for seed {seed}: {e}")
+                continue
+        
+            # Create plot
+            fig = plt.figure(figsize=(4, 4))
+            ax = fig.add_subplot(111)
+            h = ax.hist2d(
+                tica_coord_full[:, 0], tica_coord_full[:, 1], 
+                bins=100, norm=LogNorm(), alpha=0.3
+            )
+            # plt.colorbar(h[3], ax=ax, label='Log Density')
+            ax.scatter(
+                tica_coord[:, 0], tica_coord[:, 1], 
+                color=blue, s=2, alpha=0.5,
+            )
+            ax.set_xlabel("TIC 1", fontsize=FONTSIZE_SMALL)
+            ax.set_ylabel("TIC 2", fontsize=FONTSIZE_SMALL)
+            format_plot_axes(
+                ax, fig=fig, 
+                model_type=cfg.method, 
+                show_y_labels=(cfg.method == "tda"),
+                align_ylabels=True
+            )
+            save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
+            logger.info(f"TICA scatter plot saved to {analysis_dir}")
             wandb.log({
                 f"tica/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png"))
             })
-            continue
-    
-        else:
-            try:
-                lag = 1000 if cfg.molecule == "1fme" else 10
-                # Load TICA model
-                if cfg.molecule == "cln025":
-                    tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_switch_lag{lag}.pkl"
-                else:
-                    tica_model_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_model_lag{lag}.pkl"
-                with open(tica_model_path, 'rb') as f:
-                    tica_model = pickle.load(f)
-                
-                # Load coordinates for background
-                tica_coord_path = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_tica_coord_lag{lag}.npy"
-                if Path(tica_coord_path).exists():
-                    tica_coord_full = np.load(tica_coord_path)
-                else:
-                    cad_full_path = f"./data/{cfg.molecule.upper()}/cad-switch.pt" if cfg.molecule == "cln025" else f"./data/{cfg.molecule.upper()}/cad.pt"
-                    cad_full = torch.load(cad_full_path).numpy()
-                    tica_coord_full = tica_model.transform(cad_full)
-            
-                # Load trajectory data
-                traj_file = analysis_dir / f"{seed}_tc.xtc"
-                if not traj_file.exists()   :
-                    logger.warning(f"No trajectory file found for seed {seed}")
-                    continue
+            plt.close()
 
-                # top_file = f"./data/{cfg.molecule.upper()}/{cfg.molecule.upper()}_from_mae.pdb"
-                top_file = f"./data/{cfg.molecule.upper()}/folded.gro"
-                if not Path(top_file).exists():
-                    logger.warning(f"Topology file not found: {top_file}")
-                    continue
-                try:
-                    traj = md.load(str(traj_file), top=top_file)
-                    ca_resid_pair = np.array([(a.index, b.index) for a, b in combinations(list(traj.topology.residues), 2)])
-                    ca_pair_contacts, _ = md.compute_contacts(traj, scheme="ca", contacts=ca_resid_pair, periodic=False)
-                    if cfg.molecule == "cln025":
-                        ca_pair_contacts_switch = (1 - np.power(ca_pair_contacts / 0.8, 6)) / (1 - np.power(ca_pair_contacts / 0.8, 12))
-                        tica_coord = tica_model.transform(ca_pair_contacts_switch)
-                    else:
-                        tica_coord = tica_model.transform(ca_pair_contacts)
-                except Exception as e:
-                    logger.warning(f"Error processing trajectory for seed {seed}: {e}")
-                    continue
-            
-                # Create plot
-                fig = plt.figure(figsize=(4, 4))
-                ax = fig.add_subplot(111)
-                h = ax.hist2d(
-                    tica_coord_full[:, 0], tica_coord_full[:, 1], 
-                    bins=100, norm=LogNorm(), alpha=0.3
-                )
-                # plt.colorbar(h[3], ax=ax, label='Log Density')
-                ax.scatter(
-                    tica_coord[:, 0], tica_coord[:, 1], 
-                    color=blue, s=2, alpha=0.5,
-                )
-                ax.set_xlabel("TIC 1", fontsize=FONTSIZE_SMALL)
-                ax.set_ylabel("TIC 2", fontsize=FONTSIZE_SMALL)
-                format_plot_axes(
-                    ax, fig=fig, 
-                    model_type=cfg.method, 
-                    show_y_labels=(cfg.method == "tda"),
-                    align_ylabels=True
-                )
-                save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
-                logger.info(f"TICA scatter plot saved to {analysis_dir}")
-                wandb.log({
-                    f"tica/{seed}": wandb.Image(str(analysis_dir / f"{filename}.png"))
-                })
-                plt.close()
-    
-            except Exception as e:
-                logger.error(f"Error in TICA scatter analysis: {e}")
-                raise    
+        except Exception as e:
+            logger.error(f"Error in TICA scatter analysis: {e}")
+            raise    
 
 
 def plot_cv_over_time(
@@ -901,65 +901,65 @@ def plot_cv_over_time(
     for seed in pbar:
         filename_time = f"cv_over_time_{seed}"
         filename_histogram = f"cv_histogram_{seed}"
-        if check_image_exists(str(analysis_dir), filename_time) and check_image_exists(str(analysis_dir), filename_histogram):
-            print(f"✓ CV over time and histogram plots already exist: {filename_time} and {filename_histogram}")
-            continue
+        # if check_image_exists(str(analysis_dir), filename_time) and check_image_exists(str(analysis_dir), filename_histogram):
+        #     print(f"✓ CV over time and histogram plots already exist: {filename_time} and {filename_histogram}")
+        #     continue
         
-        else:
-            try:
-                colvar_file = log_dir / f"{seed}" / "COLVAR"
-                if not colvar_file.exists():
-                    logger.warning(f"COLVAR file not found: {colvar_file}")
-                    continue
-                traj_dat = np.genfromtxt(colvar_file, skip_header=1)
-                time = traj_dat[:, 0] / 1000
-                cv = traj_dat[:, 1]
-                
-                # Plot - CV over time
-                if not check_image_exists(str(analysis_dir), filename_time):
-                    fig = plt.figure(figsize=(5, 3))
-                    ax = fig.add_subplot(111)
-                    ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, color=blue)
-                    ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
-                    ax.set_yticks([-1, -0.5, 0, 0.5, 1])
-                    ax.set_xlabel("Time (ns)", fontsize=FONTSIZE_SMALL)
-                    ax.set_ylabel("CV Values", fontsize=FONTSIZE_SMALL)
-                    format_plot_axes(
-                        ax, fig=fig, 
-                        model_type=cfg.method, 
-                        show_y_labels=(cfg.method == "tda"),
-                        align_ylabels=True
-                    )
-                    save_plot_dual_format(str(analysis_dir), filename_time, dpi=300, bbox_inches="tight")
-                    logger.info(f"CV over time plot saved to {analysis_dir}")
-                    wandb.log({
-                        f"cv_over_time/{seed}": wandb.Image(str(analysis_dir / f"{filename_time}.png"))
-                    })
-                    plt.close()
-                
-                # Plot - CV histogram
-                if not check_image_exists(str(analysis_dir), filename_histogram):
-                    fig = plt.figure(figsize=(5, 3))
-                    ax = fig.add_subplot(111)
-                    ax.hist(cv, bins=50, alpha=0.7, color=blue, edgecolor='black', log=True)
-                    ax.set_xlabel("CV Values", fontsize=FONTSIZE_SMALL)
-                    ax.set_ylabel("Frequency", fontsize=FONTSIZE_SMALL)
-                    format_plot_axes(
-                        ax, fig=fig, 
-                        model_type=cfg.method, 
-                        show_y_labels=(cfg.method == "tda"),
-                        align_ylabels=True
-                    )
-                    save_plot_dual_format(str(analysis_dir), filename_histogram, dpi=300, bbox_inches="tight")
-                    logger.info(f"CV histogram plot saved to {analysis_dir}")
-                    wandb.log({
-                        f"cv_histogram/{seed}": wandb.Image(str(analysis_dir / f"{filename_histogram}.png"))
-                    })
-                    plt.close()
-                
-            except Exception as e:
-                logger.error(f"Error in CV over time analysis: {e}")
-                raise
+        # else:
+        try:
+            colvar_file = log_dir / f"{seed}" / "COLVAR"
+            if not colvar_file.exists():
+                logger.warning(f"COLVAR file not found: {colvar_file}")
+                continue
+            traj_dat = np.genfromtxt(colvar_file, skip_header=1)
+            time = traj_dat[:, 0] / 1000
+            cv = traj_dat[:, 1]
+            
+            # Plot - CV over time
+            # if not check_image_exists(str(analysis_dir), filename_time):
+            fig = plt.figure(figsize=(5, 3))
+            ax = fig.add_subplot(111)
+            ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, color=blue)
+            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
+            ax.set_yticks([-1, -0.5, 0, 0.5, 1])
+            ax.set_xlabel("Time (ns)", fontsize=FONTSIZE_SMALL)
+            ax.set_ylabel("CV Values", fontsize=FONTSIZE_SMALL)
+            format_plot_axes(
+                ax, fig=fig, 
+                model_type=cfg.method, 
+                show_y_labels=(cfg.method == "tda"),
+                align_ylabels=True
+            )
+            save_plot_dual_format(str(analysis_dir), filename_time, dpi=300, bbox_inches="tight")
+            logger.info(f"CV over time plot saved to {analysis_dir}")
+            wandb.log({
+                f"cv_over_time/{seed}": wandb.Image(str(analysis_dir / f"{filename_time}.png"))
+            })
+            plt.close()
+            
+            # Plot - CV histogram
+            # if not check_image_exists(str(analysis_dir), filename_histogram):
+            fig = plt.figure(figsize=(5, 3))
+            ax = fig.add_subplot(111)
+            ax.hist(cv, bins=50, alpha=0.7, color=blue, edgecolor='black', log=True)
+            ax.set_xlabel("CV Values", fontsize=FONTSIZE_SMALL)
+            ax.set_ylabel("Frequency", fontsize=FONTSIZE_SMALL)
+            format_plot_axes(
+                ax, fig=fig, 
+                model_type=cfg.method, 
+                show_y_labels=(cfg.method == "tda"),
+                align_ylabels=True
+            )
+            save_plot_dual_format(str(analysis_dir), filename_histogram, dpi=300, bbox_inches="tight")
+            logger.info(f"CV histogram plot saved to {analysis_dir}")
+            wandb.log({
+                f"cv_histogram/{seed}": wandb.Image(str(analysis_dir / f"{filename_histogram}.png"))
+            })
+            plt.close()
+            
+        except Exception as e:
+            logger.error(f"Error in CV over time analysis: {e}")
+            raise
 
 
 @hydra.main(
