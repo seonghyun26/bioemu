@@ -576,7 +576,13 @@ def plot_free_energy_curve(
                 all_cvs.append(cv)
                 print(f"Time: {time}")
                 print(f"Time [step_grid]: {time[step_grid] * 0.001}")
-                all_times.append(time[step_grid] * 0.001)
+                time_steps = time[step_grid] * 0.001
+                if time_steps.shape[0] == 0:
+                    step_grid_without_skip_steps = np.arange(
+                        unit_steps, total_steps, unit_steps
+                    )
+                    time_steps = time[step_grid_without_skip_steps] * 0.001
+                all_times.append(time_steps)
                 
                 Delta_Fs = []
                 for current_step in tqdm(step_grid):
