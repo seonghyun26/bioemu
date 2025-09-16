@@ -232,39 +232,39 @@ def gmx_process_trajectory(
     data_dir = data_dir
     for seed in pbar:
         trj_save_path = f"{analysis_dir}/{seed}_tc.xtc"
-        if os.path.exists(trj_save_path):
-            print(f"✓ trjconv file already exists: {trj_save_path}")
-            continue
+        # if os.path.exists(trj_save_path):
+        #     print(f"✓ trjconv file already exists: {trj_save_path}")
+        #     continue
         
-        else:
-            cmd = [
-                "gmx", "trjconv",
-                "-f", f"{log_dir}/{seed}.xtc",
-                "-s", f"{data_dir}/protein.tpr",
-                "-pbc", "mol",
-                "-o", trj_save_path,
-            ]
-            
-            print(f"Running command: {' '.join(cmd)}")
-            try:
-                process = subprocess.run(
-                    cmd,
-                    input="0\n0\n",
-                    capture_output=True,
-                    text=True
-                )
-                if process.returncode == 0:
-                    print(f"✓ gmx trjconv completed successfully, seed {seed}")
-                    print(f"Created trjconv file: {trj_save_path}")
-                else:
-                    print(f"✗ gmx trjconv failed with return code {process.returncode}, seed {seed}")
-                if process.stdout:
-                    print(f"STDOUT:, seed {seed}:", process.stdout)
-                if process.stderr:
-                    print(f"GROMACSOUT:, seed {seed}:", process.stderr)
-                    
-            except subprocess.CalledProcessError as e:
-                print(f"gmx trjconv failed, seed {seed}: {e}")
+        # else:
+        cmd = [
+            "gmx", "trjconv",
+            "-f", f"{log_dir}/{seed}.xtc",
+            "-s", f"{data_dir}/protein.tpr",
+            "-pbc", "mol",
+            "-o", trj_save_path,
+        ]
+        
+        print(f"Running command: {' '.join(cmd)}")
+        try:
+            process = subprocess.run(
+                cmd,
+                input="0\n0\n",
+                capture_output=True,
+                text=True
+            )
+            if process.returncode == 0:
+                print(f"✓ gmx trjconv completed successfully, seed {seed}")
+                print(f"Created trjconv file: {trj_save_path}")
+            else:
+                print(f"✗ gmx trjconv failed with return code {process.returncode}, seed {seed}")
+            if process.stdout:
+                print(f"STDOUT:, seed {seed}:", process.stdout)
+            if process.stderr:
+                print(f"GROMACSOUT:, seed {seed}:", process.stderr)
+                
+        except subprocess.CalledProcessError as e:
+            print(f"gmx trjconv failed, seed {seed}: {e}")
     
     
 def gmx_process_energy(
@@ -281,38 +281,38 @@ def gmx_process_energy(
     )
     for seed in pbar:
         edr_save_path = f"{analysis_dir}/{seed}.xvg"
-        if os.path.exists(edr_save_path):
-            print(f"✓ energy file already exists: {edr_save_path}")
-            continue
+        # if os.path.exists(edr_save_path):
+        #     print(f"✓ energy file already exists: {edr_save_path}")
+        #     continue
         
-        else:
-            cmd = [
-                "gmx", "energy",
-                "-f", f"{log_dir}/{seed}.edr", 
-                "-o", f"{analysis_dir}/{seed}.xvg",
-                '-xvg', 'none'
-            ]
+        # else:
+        cmd = [
+            "gmx", "energy",
+            "-f", f"{log_dir}/{seed}.edr", 
+            "-o", f"{analysis_dir}/{seed}.xvg",
+            '-xvg', 'none'
+        ]
 
-            print(f"Running command: {' '.join(cmd)}")
-            try:
-                process = subprocess.run(
-                    cmd,
-                    input="16 17 9 0\\n",
-                    capture_output=True,
-                    text=True
-                )
-                if process.returncode == 0:
-                    print(f"✓ gmx energy completed successfully, seed {seed}")
-                    print(f"Created energy file: {analysis_dir}/{seed}.xvg")
-                else:
-                    print(f"✗ gmx energy failed with return code {process.returncode}, seed {seed}")
-                if process.stdout:
-                    print(f"STDOUT:, seed {seed}:", process.stdout)
-                if process.stderr:
-                    print(f"GROMACSOUT:, seed {seed}:", process.stderr)
-                
-            except subprocess.CalledProcessError as e:
-                print(f"gmx energy failed, seed {seed} : {e}")
+        print(f"Running command: {' '.join(cmd)}")
+        try:
+            process = subprocess.run(
+                cmd,
+                input="16 17 9 0\\n",
+                capture_output=True,
+                text=True
+            )
+            if process.returncode == 0:
+                print(f"✓ gmx energy completed successfully, seed {seed}")
+                print(f"Created energy file: {analysis_dir}/{seed}.xvg")
+            else:
+                print(f"✗ gmx energy failed with return code {process.returncode}, seed {seed}")
+            if process.stdout:
+                print(f"STDOUT:, seed {seed}:", process.stdout)
+            if process.stderr:
+                print(f"GROMACSOUT:, seed {seed}:", process.stderr)
+            
+        except subprocess.CalledProcessError as e:
+            print(f"gmx energy failed, seed {seed} : {e}")
 
 
 
