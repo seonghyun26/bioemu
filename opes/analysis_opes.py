@@ -588,6 +588,7 @@ def plot_free_energy_curve(
                 for current_step in tqdm(step_grid):
                     cv_t = cv[skip_steps:current_step]
                     W_t = W[skip_steps:current_step]
+                        
                     Delta_F = DeltaF_fromweights(
                         xi_traj=cv_t,
                         weights=W_t,
@@ -595,6 +596,20 @@ def plot_free_energy_curve(
                         T=equil_temp,
                     )
                     Delta_Fs.append(Delta_F)
+                    print(Delta_F)
+                print(Delta_Fs)
+                if Delta_Fs[0].shape[0] == 0:
+                    Delta_Fs = []
+                    for current_step in tqdm(step_grid_without_skip_steps):
+                        cv_t = cv[current_step]
+                        W_t = W[current_step]
+                        Delta_F = DeltaF_fromweights(
+                            xi_traj=cv_t,
+                            weights=W_t,
+                            cv_thresh=cv_thresh,
+                            T=equil_temp,
+                        )
+                        Delta_Fs.append(Delta_F)
                 Delta_Fs = np.array(Delta_Fs)
                 all_delta_fs.append(Delta_Fs)
                 
