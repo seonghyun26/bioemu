@@ -574,8 +574,6 @@ def plot_free_energy_curve(
                 beta = 1.0 / (R * equil_temp)
                 W = np.exp(beta * bias)  
                 all_cvs.append(cv)
-                print(f"Time: {time}")
-                print(f"Time [step_grid]: {time[step_grid] * 0.001}")
                 time_steps = time[step_grid] * 0.001
                 if time_steps.shape[0] == 0:
                     step_grid_without_skip_steps = np.arange(
@@ -597,8 +595,7 @@ def plot_free_energy_curve(
                     )
                     Delta_Fs.append(Delta_F)
                     print(Delta_F)
-                print(Delta_Fs)
-                if Delta_Fs[0].shape[0] == 0:
+                if len(Delta_Fs) == 0 or Delta_Fs[0].shape[0] == 0:
                     Delta_Fs = []
                     for current_step in tqdm(step_grid_without_skip_steps):
                         cv_t = cv[current_step]
@@ -625,8 +622,6 @@ def plot_free_energy_curve(
             all_delta_fs_padded[i, :len(x)] = x
         idx_longest = int(np.argmax([len(t) for t in all_times]))
         time_axis = all_times[idx_longest]
-        print(f"All time axis: {all_times}")
-        print(f"Time axis: {time_axis}")
         
         # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
         has_data = (~np.isnan(all_delta_fs_padded)) & (~np.isinf(all_delta_fs_padded))
