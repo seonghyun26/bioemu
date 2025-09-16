@@ -574,6 +574,8 @@ def plot_free_energy_curve(
                 beta = 1.0 / (R * equil_temp)
                 W = np.exp(beta * bias)  
                 all_cvs.append(cv)
+                print(f"Time: {time}")
+                print(f"Time [step_grid]: {time[step_grid] * 0.001}")
                 all_times.append(time[step_grid] * 0.001)
                 
                 Delta_Fs = []
