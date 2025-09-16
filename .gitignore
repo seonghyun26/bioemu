@@ -136,7 +136,6 @@ cython_debug/
 *.cpt
 *.gro
 *.edr
-*.tpr
 *.npz
 *.xtc
 *.ckpt
