@@ -478,12 +478,6 @@ def plot_pmf(
     fig = plt.figure(figsize=(6, 4))
     ax = fig.add_subplot(111)
     ax.plot(
-        cv_grid, reference_pmf,
-        color=COLORS[1], linewidth=2, linestyle="--",
-        label="Reference",
-        zorder=6,
-    )
-    ax.plot(
         cv_grid, mean_pmf,
         color=blue, linewidth=4,
         zorder=4,
@@ -499,6 +493,12 @@ def plot_pmf(
             label=f"OPES {idx}",
             zorder=2,
         )
+    ax.plot(
+        cv_grid, reference_pmf,
+        color=COLORS[1], linewidth=2, linestyle="--",
+        label="Reference",
+        zorder=6,
+    )
     ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
     ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
     ax.spines['top'].set_visible(False)
@@ -632,16 +632,6 @@ def plot_free_energy_curve(
     # Plot
     fig = plt.figure(figsize=(6, 4))
     ax = fig.add_subplot(111)
-    if reference_Delta_F is not None and not np.isnan(reference_Delta_F):
-        ax.axhline(
-            y=reference_Delta_F, color=COLORS[1], linestyle='--', 
-            label='Reference', linewidth=4,
-            zorder=6
-        )
-        ax.fill_between(
-            [0, time_axis[-1]], reference_Delta_F - 4, reference_Delta_F + 4,
-            color=COLORS[1], alpha=0.2,
-        )
     mask = ~np.isnan(mean_delta_fs)
     if np.any(mask):
         ax.plot(
@@ -664,6 +654,16 @@ def plot_free_energy_curve(
                 label=f"OPES {idx}",
                 zorder=2
             )
+    if reference_Delta_F is not None and not np.isnan(reference_Delta_F):
+        ax.axhline(
+            y=reference_Delta_F, color=COLORS[1], linestyle='--', 
+            label='Reference', linewidth=4,
+            zorder=6
+        )
+        ax.fill_between(
+            [0, time_axis[-1]], reference_Delta_F - 4, reference_Delta_F + 4,
+            color=COLORS[1], alpha=0.2,
+        )
     ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
     if cfg.molecule == "cln025":
         ax.set_yticks([-15, 0, 15, 30])
