@@ -1,7 +1,7 @@
 molecule: gtt
 method: ours
 ckpt_dir: .
-ckpt_path: 0905_160702-GTT
+ckpt_path: 0917_150545-GTT
 date: debug
 tags: ['opes']
 start_gpu: 0
