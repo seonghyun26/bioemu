@@ -187,27 +187,27 @@ def save_plot_dual_format(
     # Save in both formats
     try:
         # Save as PNG
-        if not os.path.exists(png_path):
-            plt.savefig(
-                png_path,
-                dpi=dpi,
-                bbox_inches=bbox_inches,
-                pad_inches=pad_inches,
-            )
-            print(f">> Saved {png_path}")
+        # if not os.path.exists(png_path):
+        plt.savefig(
+            png_path,
+            dpi=dpi,
+            bbox_inches=bbox_inches,
+            pad_inches=pad_inches,
+        )
+        print(f">> Saved {png_path}")
         
         # Save as PDF
-        if not os.path.exists(pdf_path):
-            if rasterized:
-                rasterize_plot_elements()
-            plt.savefig(
-                pdf_path,
-                dpi=dpi,
-                bbox_inches=bbox_inches,
-                pad_inches=pad_inches,
-            )
-            wandb.save(pdf_path)
-            print(f">> Saved {pdf_path}")
+        # if not os.path.exists(pdf_path):
+        if rasterized:
+            rasterize_plot_elements()
+        plt.savefig(
+            pdf_path,
+            dpi=dpi,
+            bbox_inches=bbox_inches,
+            pad_inches=pad_inches,
+        )
+        wandb.save(pdf_path)
+        print(f">> Saved {pdf_path}")
 
         return True
         
@@ -918,6 +918,10 @@ def plot_cv_over_time(
             traj_dat = np.genfromtxt(colvar_file, skip_header=1)
             time = traj_dat[:, 0] / 1000
             cv = traj_dat[:, 1]
+            print(f"Time shape: {time.shape}")
+            print(f"CV shape: {cv.shape}")
+            print(f"Time last: {time[-1]}")
+            print(f"CV last: {cv[-1]}")
             
             # Plot - CV over time
             # if not check_image_exists(str(analysis_dir), filename_time):
