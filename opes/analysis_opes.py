@@ -495,7 +495,7 @@ def plot_pmf(
         )
     ax.plot(
         cv_grid, reference_pmf,
-        color=COLORS[1], linewidth=2, linestyle="--",
+        color=COLORS[1], linewidth=3, linestyle="--",
         label="Reference",
         zorder=6,
     )
