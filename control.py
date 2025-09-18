@@ -1082,6 +1082,11 @@ def main(cfg):
         
     for p in score_model.parameters():
         p.requires_grad = True
+    wandb.watch(
+        score_model,
+        log=cfg.log.score_model.log,
+        log_freq=cfg.log.score_model.watch_freq,
+    )
     
     if cfg.log.score_model.watch:
         if cfg.model.mlcv_model.condition_mode == "backbone-both":
@@ -1112,8 +1117,6 @@ def main(cfg):
     
     # MLCV model
     method = cfg.model.mlcv_model.name
-    
-    # Check if we should load a pre-trained model
     load_pretrained = getattr(cfg.model.mlcv_model, 'load_pretrained', False)
     
     if method == "ours":
@@ -1565,7 +1568,7 @@ def main(cfg):
     try:
         traced_model.eval()
         batch_size_eval = 10000
-        projection_data_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{cfg.data.molecule}-0-protein/{cfg.data.molecule}-0-cad.pt"
+        projection_data_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{cfg.data.system_id}-0-protein/{cfg.data.system_id}-0-cad.pt"
         projection_data = torch.load(projection_data_path).to(device)
         eval_loader = DataLoader(
             TensorDataset(projection_data),
@@ -1586,6 +1589,7 @@ def main(cfg):
         if len(all_cv_batches) > 0:
             all_cv = torch.cat(all_cv_batches, dim=0)
             torch.save(all_cv, f"model/{cfg.log.date}/mlcv_values.pt")
+            np.save(f"model/{cfg.log.date}/mlcv_values.npy", all_cv.detach().cpu().numpy())
             print(f"Saved CV values computed with traced model to model/{cfg.log.date}/mlcv_values.pt")
             print(f"CV shape: {all_cv.shape}, range: [{all_cv.min().item():.6f}, {all_cv.max().item():.6f}]")
         else:

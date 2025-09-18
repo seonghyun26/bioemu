@@ -38,6 +38,8 @@ np.NaN = np.nan
 blue = (70 / 255, 110 / 255, 250 / 255)
 R = 0.008314462618  # kJ/mol/K
 logger = logging.getLogger(__name__)
+RECTANGLE_FIGSIZE = (6, 4)
+SQUARE_FIGSIZE = (4, 4)
 FONTSIZE = 20
 FONTSIZE_SMALL = 16
 LINEWIDTH = 1.5
@@ -475,7 +477,11 @@ def plot_pmf(
     pmf_mae = np.mean(np.abs(mean_pmf[pmf_mask] - reference_pmf[pmf_mask]))
 
     print(f"> Plotting PMF")
-    fig = plt.figure(figsize=(6, 4))
+    if cfg.method == "tda":
+        fig_size = (6.8, 4)
+    else:
+        fig_size = RECTANGLE_FIGSIZE
+    fig = plt.figure(figsize=fig_size, layout='constrained')
     ax = fig.add_subplot(111)
     ax.plot(
         cv_grid, mean_pmf,
@@ -634,7 +640,11 @@ def plot_free_energy_curve(
     )
     
     # Plot
-    fig = plt.figure(figsize=(6, 4))
+    if cfg.method == "tda":
+        fig_size = (6.8, 4)
+    else:
+        fig_size = RECTANGLE_FIGSIZE
+    fig = plt.figure(figsize=fig_size, layout='constrained')
     ax = fig.add_subplot(111)
     mask = ~np.isnan(mean_delta_fs)
     if np.any(mask):
