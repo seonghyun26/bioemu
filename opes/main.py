@@ -88,10 +88,10 @@ class OPESSimulationRunner:
         jit_model = torch.jit.load(target_mlcv_model)
         jit_model.eval()
         for name, param in jit_model.named_parameters():
-            if param.device != torch.device("cuda:0"):
-                jit_model = jit_model.to("cuda:0")
+            if param.device != torch.device(f"cuda:{seed}"):
+                jit_model = jit_model.to(f"cuda:{seed}")
                 torch.jit.save(jit_model, target_mlcv_model)
-                logger.info(f"{target_mlcv_model} moved to cuda:0")
+                logger.info(f"{target_mlcv_model} moved to cuda:{seed}")
             else:
                 logger.info(f"{target_mlcv_model} already at cuda")
             break
