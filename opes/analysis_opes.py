@@ -609,6 +609,8 @@ def plot_free_energy_curve(
         all_delta_fs_padded[i, :len(x)] = x
     idx_longest = int(np.argmax([len(t) for t in all_times]))
     time_axis = all_times[idx_longest]
+    print(f"Time axis shape: {time_axis.shape}")
+    print(f"Time axis last: {time_axis[-1]}")
     
     # Compute mean/std ignoring NaNs, but only keep columns where at least one value is present
     has_data = (~np.isnan(all_delta_fs_padded)) & (~np.isinf(all_delta_fs_padded))
@@ -617,6 +619,8 @@ def plot_free_energy_curve(
     std_delta_fs  = np.nanstd(valid_values,  axis=0)
     print(f"Mean delta F: {mean_delta_fs}")
     print(f"Std delta F: {std_delta_fs}")
+    print(f"Mean delta F last: {mean_delta_fs[-1]}")
+    print(f"Std delta F last: {std_delta_fs[-1]}")
     
     # Compute reference Delta F
     print(f"> Computing reference Delta F")
