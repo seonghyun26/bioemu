@@ -334,7 +334,7 @@ def compute_cv_values(
         tuple: cv_values
     """
     if cfg.molecule.upper() == "CLN025":
-        date = "0917_061941"
+        date = "0914_094907"
         cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
     else:
         cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv.npy"
