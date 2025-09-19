@@ -333,7 +333,11 @@ def compute_cv_values(
     Returns:
         tuple: cv_values
     """
-    cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv.npy"
+    if cfg.molecule.upper() == "CLN025":
+        date = "0917_061941"
+        cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+    else:
+        cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv.npy"
     if os.path.exists(cv_path):
         print(f"> Using cached CV values from {cv_path}")
         cv = np.load(cv_path)
