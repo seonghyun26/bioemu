@@ -334,19 +334,21 @@ def compute_cv_values(
         tuple: cv_values
     """
     if cfg.method == "ours":
-        if cfg.molecule.upper() == "CLN025":
-            date = "0914_094907"
-            cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
-        elif cfg.molecule.upper() == "2JOF":
-            date = "0814_073849"
-            cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
-        elif cfg.molecule.upper() == "1FME":
-            date = "0914_150513"
-            cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
-        elif cfg.molecule.upper() == "GTT":
-            # date = "0917_150545"
-            date = "0905_160702"
-            cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        # if cfg.molecule.upper() == "CLN025":
+        #     date = "0914_094907"
+        #     cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        # elif cfg.molecule.upper() == "2JOF":
+        #     date = "0814_073849"
+        #     cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        # elif cfg.molecule.upper() == "1FME":
+        #     date = "0914_150513"
+        #     cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        # elif cfg.molecule.upper() == "GTT":
+        #     # date = "0917_150545"
+        #     date = "0905_160702"
+        #     cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        date = cfg.ckpt_path.split("-")[0]
+        cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
     else:
         cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv.npy"
     if os.path.exists(cv_path):

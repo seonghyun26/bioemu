@@ -1793,25 +1793,25 @@ def plot_folded_unfolded_violin_analysis(
         cv_unfolded = cv[unfolded_indices, cv_dim]
         
         if model_type == "tda":
-            fig_size = (3.8, 3)
+            fig_size = (3.2, 3)
         else:
-            fig_size = (3, 3)
+            fig_size = (2.4, 3)
         fig = plt.figure(figsize=fig_size, layout='constrained')
         ax = fig.add_subplot(111)
         violin_data = [cv_folded, cv_unfolded]
         violin_labels = ['Folded', 'Unfolded']
         violin_parts = ax.violinplot(
-            violin_data, positions=range(len(violin_data)), widths=1.0,
+            violin_data, positions=range(len(violin_data)), widths=0.8,
             showmeans=False, showmedians=False, showextrema=True,
         )
         format_violin_parts(violin_parts, means=False, medians=False, extrema=True)
         ax.set_xticks(range(len(violin_labels)))
         ax.set_xticklabels(violin_labels, fontsize=FONTSIZE_SMALL)
         if model_type == "tda":
-            ax.set_ylabel(f'CV {cv_dim}', fontsize=FONTSIZE_SMALL)
+            ax.set_ylabel(f'CV', fontsize=FONTSIZE_SMALL)
         ax.set_yticks([-1.0, 0, 1.0])
         ax.set_ylim(-1.1, 1.1)
-        ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
+        # ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
     
         folded_mean = np.mean(cv_folded)
         unfolded_mean = np.mean(cv_unfolded)
