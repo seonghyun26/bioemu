@@ -344,7 +344,8 @@ def compute_cv_values(
             date = "0914_150513"
             cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
         elif cfg.molecule.upper() == "GTT":
-            date = "0917_150545"
+            # date = "0917_150545"
+            date = "0905_160702"
             cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
     else:
         cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv.npy"
