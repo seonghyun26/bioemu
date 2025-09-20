@@ -340,12 +340,12 @@ def compute_cv_values(
         elif cfg.molecule.upper() == "2JOF":
             date = "0814_073849"
             cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
-        # elif cfg.molecule.upper() == "1FME":
-        #     date = "0906_145917"
-        #     cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
-        # elif cfg.molecule.upper() == "GTT":
-        #     date = "0917_150545"
-        #     cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        elif cfg.molecule.upper() == "1FME":
+            date = "0914_150513"
+            cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        elif cfg.molecule.upper() == "GTT":
+            date = "0917_150545"
+            cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
     else:
         cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv.npy"
     if os.path.exists(cv_path):
