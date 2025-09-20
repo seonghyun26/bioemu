@@ -46,6 +46,8 @@ class TimelagDataset(Dataset):
             return len(self.current_pos)
         elif self.representation == "cad-pos":
             return len(self.current_cad)
+        elif self.representation == "cad-pos-ac":
+            return len(self.current_cad)
         else:
             raise ValueError(f"Invalid representation: {self.representation}")
 
@@ -70,6 +72,14 @@ class TimelagDataset(Dataset):
                 "timelagged_data": self.timelag_pos[idx],
                 "current_orientation": self.current_orientation[idx],
                 "timelagged_orientation": self.timelag_orientation[idx]
+            }
+        elif self.representation == "cad-pos-ac":
+            return {
+                "current_data": self.current_cad[idx],
+                "timelagged_data": self.timelag_pos[idx],
+                "current_orientation": self.current_orientation[idx],
+                "timelagged_orientation": self.timelag_orientation[idx],
+                "timelagged_cad": self.timelag_cad[idx],
             }
         else:
             raise ValueError(f"Invalid representation: {self.representation}")

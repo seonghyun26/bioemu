@@ -60,6 +60,7 @@ CUDA_DEVICE = get_available_cuda_device()
 blue = "#466eff"
 green = "#64B478"
 red = "#EB423D"
+orange = "#FF883D"
 COLORS = ['blue', 'red', 'green', 'orange', 'purple', 'cyan', 'brown', 'magenta']
 SQUARE_FIGSIZE = (4, 4)
 RECTANGLE_FIGSIZE = (5, 4)
@@ -489,22 +490,22 @@ def get_molecule_residue_range(
     
     if molecule == "CLN025":
         residue_indices = [1, 2, 7, 8]
-        residue_indices_0 = [0, 1, 6, 7]
+        # residue_indices_0 = [0, 1, 6, 7]
     elif molecule == "2JOF":
-        residue_indices = [2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
-        residue_indices_0 = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12]
+        residue_indices = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
+        # residue_indices_0 = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12]
     elif molecule == "1FME":
-        residue_indices = [4, 5, 6, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
-        residue_indices_0 = [3, 4, 5, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+        residue_indices = [2, 3, 4, 5, 6, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+        # residue_indices_0 = [3, 4, 5, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
     elif molecule == "GTT":
-        residue_indices = [7, 8, 9, 10, 11, 17, 18, 19, 20, 21, 27, 28]
-        residue_indices_0 = [6, 7, 8, 9, 10, 16, 17, 18, 19, 20, 26, 27]
+        residue_indices = [7, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 26, 27, 28]
+        # residue_indices_0 = [6, 7, 8, 9, 10, 16, 17, 18, 19, 20, 26, 27]
     else:
         print(f"No specific residue range defined for molecule {molecule}, using all residues")
         residue_indices = None
-        residue_indices_0 = None
+        # residue_indices_0 = None
     
-    return residue_indices, residue_indices_0
+    return residue_indices
 
 def load_and_filter_dssp_data(
     molecule,
@@ -523,7 +524,7 @@ def load_and_filter_dssp_data(
               - 'filtered': Boolean indicating if filtering was applied
     """
     # Get residue ranges for this molecule
-    residue_indices, residue_indices_0 = get_molecule_residue_range(molecule)
+    residue_indices = get_molecule_residue_range(molecule)
     
     # Load DSSP data
     dssp_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-dssp.npy"
@@ -540,8 +541,8 @@ def load_and_filter_dssp_data(
     # Load full DSSP data
     if os.path.exists(dssp_path):
         dssp_full = np.load(dssp_path)
-        if residue_indices_0 is not None:
-            result['dssp_full'] = dssp_full[:, residue_indices_0]
+        if residue_indices is not None:
+            result['dssp_full'] = dssp_full[:, residue_indices]
             print(f"Loaded and filtered DSSP full data for {molecule}: using residues {residue_indices}")
         else:
             result['dssp_full'] = dssp_full
@@ -552,8 +553,8 @@ def load_and_filter_dssp_data(
     # Load simplified DSSP data
     if os.path.exists(dssp_simplified_path):
         dssp_simplified = np.load(dssp_simplified_path)
-        if residue_indices_0 is not None:
-            result['dssp_simplified'] = dssp_simplified[:, residue_indices_0]
+        if residue_indices is not None:
+            result['dssp_simplified'] = dssp_simplified[:, residue_indices]
             print(f"Loaded and filtered DSSP simplified data for {molecule}")
         else:
             result['dssp_simplified'] = dssp_simplified
@@ -561,7 +562,7 @@ def load_and_filter_dssp_data(
     else:
         print(f"DSSP simplified data not found at {dssp_simplified_path}")
     
-    return result
+    return result, residue_indices
 
 def rasterize_plot_elements():
     """
@@ -606,7 +607,7 @@ def format_violin_parts(
     # Customize violin plot bodies
     for i, body in enumerate(violin_parts['bodies']):
         body.set_facecolor(COLORS[i % len(COLORS)])
-        body.set_alpha(0.7)
+        body.set_alpha(0.85)
     
     # Customize violin plot lines
     violin_parts['cbars'].set_edgecolor('gray')
@@ -1116,9 +1117,9 @@ def plot_committor_analysis(
         # ax.set_title(f"CV {cv_dim} vs Committor - {model_type.upper()}")
         ax.set_xticks([0.00, 0.25, 0.50, 0.75, 1.00])
         ax.set_xlabel("Committor", fontsize=FONTSIZE_SMALL)
+        ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
         if model_type == "tda":
             ax.set_ylabel(f"CV {cv_dim}", fontsize=FONTSIZE_SMALL)
-            ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
         
         # Apply consistent formatting
         format_plot_axes(
@@ -1543,132 +1544,82 @@ def plot_per_residue_violin_analysis(
     img_dir,
     date=None,
     overwrite=False,
+    residue_indices=None,
 ):
     """Plot per-residue secondary structure violin plots for selected residues."""
     os.makedirs(img_dir, exist_ok=True)
+    os.makedirs(os.path.join(img_dir, "dssp-per-residue"), exist_ok=True)
     MLCV_DIM = cv.shape[1]
-    
-    # Get DSSP simplified data
     dssp_simplified = dssp_data['dssp_simplified']
     residue_indices = dssp_data['residue_indices']
     
-    if dssp_simplified is None:
-        print("DSSP simplified data not available, skipping per-residue violin analysis")
-        return
-    
-    # Define selected residues for different molecules
-    if molecule == "CLN025":
-        selected_residues = [1, 2, 7, 8]
-    elif molecule == "2JOF":
-        selected_residues = [2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
-    elif molecule == "1FME":
-        selected_residues = [4, 5, 6, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
-    elif molecule == "GTT":
-        selected_residues = [7, 8, 9, 10, 11, 17, 18, 19, 20, 21, 27, 28]
-    # elif molecule == "2F4K":
-    #     selected_residues = [2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17, 18, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
-    # elif molecule == "NTL9":
-    #     selected_residues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
-    else:
-        print(f"No specific residues defined for molecule {molecule}, skipping per-residue analysis")
-        return
-    
-    # Limit to maximum plots and available residues
-    max_plots = 24
-    available_residues = min(dssp_simplified.shape[1], len(selected_residues))
-    selected_residues = selected_residues[:min(max_plots, available_residues)]
-    
     for cv_dim in range(MLCV_DIM):
         print(f"> Plotting per-residue DSSP violin analysis for {model_type} {molecule}")
-        # Collect CV values for each residue and secondary structure type
-        residue_data = {}
-        for residue_idx in selected_residues:
-            if residue_idx >= dssp_simplified.shape[1]:
-                continue
-            ss_data = {}
-            ss_types = np.unique(dssp_simplified[:, residue_idx])
-            for ss_type in ss_types:
-                cv_values = []
-                for frame_idx in range(len(dssp_simplified)):
-                    if dssp_simplified[frame_idx, residue_idx] == ss_type:
-                        cv_values.append(cv[frame_idx, cv_dim])
-                
-                if len(cv_values) > 50:  # Minimum threshold for meaningful distribution
-                    ss_data[ss_type] = np.array(cv_values)
-            if len(ss_data) >= 2:  # Need at least 2 secondary structure types
-                residue_data[residue_idx] = ss_data
-        
-        if len(residue_data) == 0:
-            print(f"No residues found with sufficient secondary structure diversity for analysis")
-            continue
-        
-        # Calculate grid size
-        # n_cols = 4
-        # n_rows = (len(residue_data) + n_cols - 1) // n_cols
-        # fig, axes = plt.subplots(n_rows, n_cols, figsize=(12, 3 * n_rows), layout='constrained')
-        # axes = axes.flatten()
-        
-        # plot_idx = 0
-        for residue_idx in sorted(residue_data.keys()):
-            filename = f"dssp-per-residue{residue_idx}-cv{cv_dim}-{model_type}"
+        for data_idx in range(dssp_simplified.shape[1]):
+            residue_idx = residue_indices[data_idx]
+            filename = f"dssp-per-residue/{residue_idx}-cv{cv_dim}-{model_type}"
             if date:
                 filename += f"_{date}"
             if check_image_exists(img_dir, filename, overwrite):
                 print(f"> Skipping {filename}.png - already exists")
                 continue
-            # ax = axes[plot_idx]
-            fig = plt.figure(figsize=(3, 4), layout='constrained')
-            ax = fig.add_subplot(111)
-            ss_data = residue_data[residue_idx]
-            ss_types_present = sorted(ss_data.keys())
-            cv_data_list = [ss_data[ss_type] for ss_type in ss_types_present]
             
-            # Create violin plot
-            violin_parts = ax.violinplot(
-                cv_data_list, positions=range(len(ss_types_present)),
-                showmeans=False, showmedians=True, showextrema=True,
-            )
+            # Analyze data
+            present = set(np.unique(dssp_simplified))
+            labels = ["C", "H", "E"]
+            existing_labels = []
+            data = []
+            for label in labels:
+                idx = np.where(dssp_simplified[:, data_idx] == label)[0]
+                if len(idx) > 0:
+                    data.append(cv[idx, cv_dim])
+                    existing_labels.append(label)
+                # else:
+                #     data.append(np.array([]))
             stats_text = ""
-            for i in range(len(ss_types_present)):
-                cv_mean = np.mean(cv_data_list[i])
-                cv_std = np.std(cv_data_list[i])
+            for i in range(len(existing_labels)):
+                cv_mean = np.nanmean(data[i])
+                cv_std = np.nanstd(data[i])
+                stats_text += f'{existing_labels[i]}: μ={cv_mean:.3f}, σ={cv_std:.3f}\n'
                 # ax.scatter(i, cv_mean, color="k", zorder=3, marker="o", s=40, label="mean" if i == 0 else "")
                 # ax.errorbar(i, cv_mean, yerr=cv_std, color="k", capsize=5, fmt="none", zorder=2)
-                stats_text += f'{ss_types_present[i]}: μ={cv_mean:.3f}, σ={cv_std:.3f}\n'
             print(stats_text)
-            # ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=FONTSIZE_SMALL)
-            format_violin_parts(violin_parts, means=False, medians=True, extrema=True)
             
-            # ax.set_title(f'Residue {residue_label}')
-            ss_labels = ['Coil' if ss == ' ' else ss for ss in ss_types_present]
-            ax.set_xlabel(f'Residue #{residue_idx}', fontsize=FONTSIZE_SMALL)
+            # Create violin plot
             if model_type == "tda":
-                ax.set_ylabel(f'CV {cv_dim} Value', fontsize=FONTSIZE_SMALL)
-                ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
-            if residue_indices is not None and residue_idx < len(residue_indices):
-                residue_label = residue_indices[residue_idx]
+                fig_size = (3.8, 3)
             else:
-                residue_label = residue_idx + 1
-            ax.set_xticks(range(len(ss_types_present)))
-            ax.set_xticklabels(ss_labels, fontsize=FONTSIZE_SMALL)
+                fig_size = (3, 3)
+            fig = plt.figure(figsize=fig_size, layout='constrained')
+            ax = fig.add_subplot(111)
+            violin_parts = ax.violinplot(
+                data,
+                showmeans=False, showmedians=True, showextrema=True,
+                widths=0.8,
+            )
+            format_violin_parts(violin_parts, means=False, medians=True, extrema=True)
+            violin_parts['bodies'][0].set_facecolor("#E0E0E0")
+            violin_parts['bodies'][1].set_facecolor(orange)
+            violin_parts['bodies'][2].set_facecolor(green)
+            ax.set_xticks(range(1, len(existing_labels)+1), labels=existing_labels, fontsize=FONTSIZE_SMALL)
+            ax.set_yticks([-1.0, 0.0, 1.0])
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True, nbins=3))
+            if model_type == "tda":
+                ax.set_ylabel(f'CVs', fontsize=FONTSIZE_SMALL)
             format_plot_axes(
                 ax, fig=fig, 
                 model_type=model_type, 
                 show_y_labels=(model_type == "tda"),
                 align_ylabels=True
             )
-            # plot_idx += 1
-        
-            # for idx in range(len(residue_data), len(axes)):
-            #     axes[idx].set_visible(False)
-            # plt.suptitle(f'CV {cv_dim} Distribution by Secondary Structure for Each Residue - {model_type.upper()}', fontsize=14)
             save_plot_dual_format(
                 img_dir, filename,
                 dpi=300, bbox_inches='tight',
                 file_log_name=f"DSSP-Per-Residue{residue_idx}-Violin-{cv_dim}",
                 overwrite=overwrite,
             )
-        plt.close()
+            plt.close()
+        print(f"> Plotted per-residue DSSP violin analysis for MLCVs dimension {cv_dim}")
 
 def plot_dssp_composition_heatmap(
     dssp_data,
@@ -2108,18 +2059,18 @@ def main():
                 dssp_data = None
                 if any(plot in plots_to_generate for plot in ['dssp_full_violin', 'dssp_simplified_violin', 'dssp_cv_heatmap', 'dssp_per_residue_violin', 'dssp_composition_heatmap']):
                     print(f"\nLoading DSSP data for {molecule}...")
-                    dssp_data = load_and_filter_dssp_data(molecule)
+                    dssp_data, residue_indices = load_and_filter_dssp_data(molecule)
                     
                     if 'dssp_per_residue_violin' in plots_to_generate:
-                        plot_per_residue_violin_analysis(cv, dssp_data, model_type, molecule, img_dir_mol, args.date, args.overwrite)
-                    if 'dssp_simplified_violin' in plots_to_generate:
-                        plot_dssp_simplified_violin_analysis(cv, dssp_data, model_type, img_dir_mol, args.date, args.overwrite)
-                    if 'dssp_full_violin' in plots_to_generate:
-                        plot_dssp_full_violin_analysis(cv, dssp_data, model_type, img_dir_mol, args.date, args.overwrite)
-                    if 'dssp_cv_heatmap' in plots_to_generate:
-                        plot_dssp_cv_heatmap(cv, dssp_data, model_type, img_dir_mol, args.date, args.overwrite)
-                    if 'dssp_composition_heatmap' in plots_to_generate:
-                        plot_dssp_composition_heatmap(dssp_data, img_dir_mol, args.overwrite)
+                        plot_per_residue_violin_analysis(cv, dssp_data, model_type, molecule, img_dir_mol, args.date, args.overwrite, residue_indices)
+                    # if 'dssp_simplified_violin' in plots_to_generate:
+                    #     plot_dssp_simplified_violin_analysis(cv, dssp_data, model_type, img_dir_mol, args.date, args.overwrite)
+                    # if 'dssp_full_violin' in plots_to_generate:
+                    #     plot_dssp_full_violin_analysis(cv, dssp_data, model_type, img_dir_mol, args.date, args.overwrite)
+                    # if 'dssp_cv_heatmap' in plots_to_generate:
+                    #     plot_dssp_cv_heatmap(cv, dssp_data, model_type, img_dir_mol, args.date, args.overwrite)
+                    # if 'dssp_composition_heatmap' in plots_to_generate:
+                    #     plot_dssp_composition_heatmap(dssp_data, img_dir_mol, args.overwrite)
                 
                 # Folded/Unfolded state analysis
                 if 'folded_unfolded_violin' in plots_to_generate:

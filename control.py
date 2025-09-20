@@ -41,6 +41,38 @@ def sanitize_range(range_tensor: torch.Tensor) -> torch.Tensor:
     return range_tensor
 
 
+def compute_auto_correlation_loss(z_t: torch.Tensor, z_t_tau: torch.Tensor) -> torch.Tensor:
+    """
+    Compute auto-correlation loss between current and time-lagged representations.
+    
+    This implements the auto-correlation loss from the VDE (Variational Dynamics Encoder) model:
+    L_ac = - (z_t_centered @ z_t_tau_centered) / (||z_t_centered|| * ||z_t_tau_centered||)
+    
+    Args:
+        z_t: Current representation tensor [batch_size, feature_dim]
+        z_t_tau: Time-lagged representation tensor [batch_size, feature_dim]
+    
+    Returns:
+        Auto-correlation loss (scalar tensor)
+    """
+    # Center the representations by subtracting their means
+    z_t_mean = z_t.mean(dim=0)
+    z_t_tau_mean = z_t_tau.mean(dim=0)
+    z_t_centered = z_t - z_t_mean.repeat(z_t.shape[0], 1)
+    z_t_tau_centered = z_t_tau - z_t_tau_mean.repeat(z_t_tau.shape[0], 1)
+    
+    # Compute auto-correlation: dot product of centered representations
+    ac_num = z_t_centered.reshape(1, -1) @ z_t_tau_centered.reshape(-1, 1)
+    
+    # Compute normalization factor: product of L2 norms
+    ac_den = z_t_centered.norm(2) * z_t_tau_centered.norm(2)
+    
+    # Auto-correlation loss (negative correlation to maximize correlation)
+    auto_correlation_loss = -ac_num / ac_den
+    
+    return auto_correlation_loss
+
+
 class PostProcess(Transform):
     """Post-processing module for MLCV normalization and sign flipping"""
     def __init__(
@@ -184,6 +216,7 @@ def calc_standard_denoising_loss(
     condition_mode: str = "none",
     min_t: float = 1e-4,
     max_t: float = 0.99,
+    mlcv_time_lagged: torch.Tensor = None,
 ) -> tuple[torch.Tensor, dict]:
     """
     Classic denoising score-matching loss for fine-tuning with time-lagged data.
@@ -219,7 +252,7 @@ def calc_standard_denoising_loss(
     target = target.to(device)
     clean_graphs: list[ChemGraph] = []
     
-    if cfg.data.representation == "cad-pos":
+    if cfg.data.representation in ["cad-pos", "cad-pos-ac"]:
         # Target contains all atom positions, we need CA only
         pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/{cfg.data.system_id}/{cfg.data.system_id}_from_mae.pdb")
         ca_indices = pdb.topology.select('name CA')
@@ -281,9 +314,17 @@ def calc_standard_denoising_loss(
     pos_target_score = -(x_t - alpha_t * clean_batch.pos) / (sigma_t ** 2)
     pos_loss = torch.nn.functional.mse_loss(predicted["pos"], pos_target_score)    
     total_loss = pos_loss
+
+    # Add auto-correlation loss if MLCV is available
+    if cfg.model.training.auto_correlation_loss and mlcv_time_lagged is not None:
+        auto_corr_loss = compute_auto_correlation_loss(mlcv, mlcv_time_lagged)
+        total_loss = total_loss + cfg.model.training.auto_correlation_loss_weight * auto_corr_loss
+    else:
+        auto_corr_loss = torch.tensor(0.0, device=total_loss.device)
     
     metrics = {
         "pos_loss": pos_loss.item(),
+        "auto_corr_loss": auto_corr_loss.item(),
         "timestep_mean": t.mean().item(),
         "timestep_std": t.std().item(),
         "total_loss": total_loss.item(),
@@ -449,7 +490,7 @@ def calc_tlc_loss(
         generated_ca_distance_mean = generated_ca_distance.mean(dim=1)
         loss = torch.nn.functional.mse_loss(generated_ca_distance_mean, target)
     
-    elif cfg.data.representation == "cad-pos":
+    elif cfg.data.representation in ["cad-pos", "cad-pos-ac"]:
         pdb = md.load_pdb(f"/home/shpark/prj-mlcv/lib/DESRES/data/{cfg.data.system_id}/{cfg.data.system_id}_from_mae.pdb")
         ca_indices = pdb.topology.select('name CA')
         
@@ -468,6 +509,23 @@ def calc_tlc_loss(
     else:
         raise ValueError(f"Representation {cfg.data.representation} not supported")
     
+    # Add auto-correlation loss if MLCV is available
+    auto_corr_loss = torch.tensor(0.0, device=device)
+    if mlcv is not None and mlcv.shape[0] > 1:  # Need at least 2 samples for correlation
+        try:
+            # For TLC loss, we have access to both current and time-lagged MLCV
+            # Use the original MLCV (current) and replicated MLCV (time-lagged) for auto-correlation
+            mlcv_current = mlcv  # Current MLCV representations
+            mlcv_timelagged = mlcv_replicated  # Time-lagged MLCV representations (replicated)
+            
+            # Compute auto-correlation between current and time-lagged MLCV
+            if mlcv_current.shape[0] > 1 and mlcv_timelagged.shape[0] > 1:
+                auto_corr_loss = compute_auto_correlation_loss(mlcv_current, mlcv_timelagged)
+                loss = loss + auto_corr_loss
+        except Exception as e:
+            print(f"Warning: Could not compute auto-correlation loss in TLC: {e}")
+            auto_corr_loss = torch.tensor(0.0, device=device)
+    
     # seq_idx = torch.arange(n-1)
     # generated_ca_seq_distances = generated_ca_pair_distances[seq_idx, seq_idx+1]
     # generated_ca_distances_distribution = generated_ca_distances_distribution + generated_ca_seq_distances
@@ -476,6 +534,9 @@ def calc_tlc_loss(
     # loss = loss / num_systems_sampled
     # generated_ca_distances_sum = generated_ca_distances_sum / num_systems_sampled
     # generated_ca_distances_distribution = generated_ca_distances_distribution / num_systems_sampled
+    
+    # Add auto-correlation loss to structure metrics
+    structure_metrics['auto_corr_loss'] = auto_corr_loss.item()
     
     return loss, structure_metrics
 
@@ -713,6 +774,8 @@ def compute_validation_loss(
             current_orientation = batch["current_orientation"]
             timelagged_orientation = batch["timelagged_orientation"]
             mlcv = mlcv_model(current_data)
+            timelagged_cad = batch["timelagged_cad"]
+            mlcv_time_lagged = mlcv_model(timelagged_cad)
             
             if training_method == 'standard':
                 loss, _ = calc_standard_denoising_loss(
@@ -726,6 +789,7 @@ def compute_validation_loss(
                     condition_mode=cfg.model.mlcv_model.condition_mode,
                     min_t=getattr(cfg.model.training, 'min_t', 1e-4),
                     max_t=getattr(cfg.model.training, 'max_t', 0.99),
+                    mlcv_time_lagged=mlcv_time_lagged,
                 )
             elif training_method == 'ppft':
                 loss, _ = calc_tlc_loss(
@@ -1345,6 +1409,8 @@ def main(cfg):
             current_orientation = batch["current_orientation"]
             timelagged_orientation = batch["timelagged_orientation"]
             mlcv = mlcv_model(current_data)
+            timelagged_cad = batch["timelagged_cad"]
+            mlcv_time_lagged = mlcv_model(timelagged_cad)
             
             if training_method == 'standard':
                 loss, loss_metrics = calc_standard_denoising_loss(
@@ -1358,6 +1424,7 @@ def main(cfg):
                     condition_mode=cfg.model.mlcv_model.condition_mode,
                     min_t=getattr(cfg.model.training, 'min_t', 1e-4),
                     max_t=getattr(cfg.model.training, 'max_t', 0.99),
+                    mlcv_time_lagged=mlcv_time_lagged,
                 )
                 structure_metrics = {}  # No structure metrics for standard denoising
                 
@@ -1484,9 +1551,7 @@ def main(cfg):
                 print(f"🛑 Early stopping triggered at epoch {epoch+1}")
                 break
         
-        pbar.set_description(f"Loss: {total_loss/num_batches:.6f}")
-        
-        # Prepare logging data
+        pbar.set_description(f"Loss: {total_loss.item()/num_batches:.6f}")
         log_data = {
             "loss": total_loss/num_batches,
             "lr": optimizer.param_groups[0]['lr'],

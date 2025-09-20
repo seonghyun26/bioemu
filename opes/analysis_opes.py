@@ -333,9 +333,19 @@ def compute_cv_values(
     Returns:
         tuple: cv_values
     """
-    if cfg.molecule.upper() == "CLN025":
-        date = "0914_094907"
-        cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+    if cfg.method == "ours":
+        if cfg.molecule.upper() == "CLN025":
+            date = "0914_094907"
+            cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        elif cfg.molecule.upper() == "2JOF":
+            date = "0814_073849"
+            cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        # elif cfg.molecule.upper() == "1FME":
+        #     date = "0906_145917"
+        #     cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        # elif cfg.molecule.upper() == "GTT":
+        #     date = "0917_150545"
+        #     cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
     else:
         cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv.npy"
     if os.path.exists(cv_path):
@@ -510,17 +520,19 @@ def plot_pmf(
         zorder=6,
     )
     ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
-    ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
+    # ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.tick_params(axis='both', labelsize=FONTSIZE_SMALL)
     ax.set_xlabel("CV", fontsize=FONTSIZE_SMALL)
+    ax.set_yticks([0, 15, 30, 45])
+    ax.set_ylim(-5, 50)
     ax.set_ylabel("PMF [kJ/mol]", fontsize=FONTSIZE_SMALL)
     plt.grid(True, alpha=0.3)
     format_plot_axes(
         ax, fig=fig, 
         model_type=cfg.method, 
-        show_y_labels=True,
+        show_y_labels=(cfg.method == "tda"),
         align_ylabels=True
     )
     save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
@@ -683,23 +695,19 @@ def plot_free_energy_curve(
             color=COLORS[1], alpha=0.2,
         )
     ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
-    if cfg.molecule == "cln025":
-        ax.set_yticks([-15, 0, 15, 30])
-    else:
-        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4))
     ax.set_xlim(0.0, time_axis[-1])
-    if cfg.molecule == "cln025":
-        ax.set_ylim(-20, 35)
+    ax.set_yticks([-15, 0, 15, 30])
+    ax.set_ylim(-20, 35)
+    ax.set_ylabel(r'$\Delta F$ [kJ/mol]', fontsize=FONTSIZE_SMALL)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     plt.xticks(fontsize=FONTSIZE_SMALL)
     plt.yticks(fontsize=FONTSIZE_SMALL)
     plt.xlabel('Time [ns]', fontsize=FONTSIZE_SMALL)
-    plt.ylabel(r'$\Delta F$ [kJ/mol]', fontsize=FONTSIZE_SMALL)
     format_plot_axes(
         ax, fig=fig, 
         model_type=cfg.method, 
-        show_y_labels=True,
+        show_y_labels=(cfg.method == "tda"),
         align_ylabels=True
     )
     
