@@ -1,5 +1,5 @@
 defaults:
-- data: 1FME-50k-cad-pos
+- data: 1FME-50k-cad-pos-ac
 - log: basic
 - model: input-score
 - sample: basic

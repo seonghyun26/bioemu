@@ -1,5 +1,5 @@
 defaults:
-- data: CLN025-cad-pos
+- data: CLN025-50k-cad-pos-ac
 - log: basic
 - model: input-score
 - sample: basic

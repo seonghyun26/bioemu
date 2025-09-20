@@ -14,6 +14,18 @@ training:
     eta_max: 1e-4
     warmup_epochs: 20
     gamma: 0.5
+  early_stopping:
+    enabled: true
+    monitor: valid_loss
+    min_delta: 0.01
+    patience: 50
+    mode: min
+    verbose: false
+  gradient_clip: true
+  gradient_clip_val: 1.0
+  enable_loss_clipping: true
+  max_loss_value: 100.0
+  min_loss_value: 0.0
 rollout:
   mid_t: 0.786
   N_rollout: 5

@@ -10,12 +10,14 @@ training:
   min_loss_value: 0.0
   method: standard
   seed: 0
-  num_epochs: 500
+  num_epochs: 800
   batch_size: 2000
   learning_rate: 1e-8
   loss: cad_rmsd
   gradient_clip: True
   gradient_clip_val: 1.0
+  auto_correlation_loss: True
+  auto_correlation_loss_weight: 0.2
   scheduler:
     name: CosineAnnealingWarmUpRestarts
     T_mult: 1
@@ -28,7 +30,7 @@ training:
     min_delta: 0.01
     patience: 50
     mode: min
-    verbose: True
+    verbose: False
 rollout:
   mid_t: 0.786
   N_rollout: 7
