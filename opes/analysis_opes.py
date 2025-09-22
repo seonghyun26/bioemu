@@ -38,7 +38,7 @@ np.NaN = np.nan
 blue = (70 / 255, 110 / 255, 250 / 255)
 R = 0.008314462618  # kJ/mol/K
 logger = logging.getLogger(__name__)
-RECTANGLE_FIGSIZE = (6, 4)
+RECTANGLE_FIGSIZE = (4, 3)
 SQUARE_FIGSIZE = (4, 4)
 FONTSIZE = 20
 FONTSIZE_SMALL = 16
@@ -488,14 +488,16 @@ def plot_pmf(
         equil_temp=equil_temp
     )
     reference_pmf -= reference_pmf.min()
-    reference_mask = ~np.isnan(reference_pmf)
+    reference_mask = ~np.isnan(reference_pmf) & (reference_pmf < 25)
     mean_pmf_mask = ~np.isnan(mean_pmf)
     pmf_mask = reference_mask & mean_pmf_mask
-    pmf_mae = np.mean(np.abs(mean_pmf[pmf_mask] - reference_pmf[pmf_mask]))
+    pmf_mae = np.mean(np.abs(all_pmfs[:, pmf_mask] - reference_pmf[pmf_mask]))
+    # pmf_mae2 = np.mean(np.abs(mean_pmf[pmf_mask] - reference_pmf[pmf_mask]))
+    # pmf_std2 = np.std(all_pmfs[:, pmf_mask] - reference_pmf[pmf_mask])
 
     print(f"> Plotting PMF")
     if cfg.method == "tica":
-        fig_size = (6.8, 4)
+        fig_size = (3.8, 2)
     else:
         fig_size = RECTANGLE_FIGSIZE
     fig = plt.figure(figsize=fig_size, layout='constrained')
@@ -661,11 +663,11 @@ def plot_free_energy_curve(
     print(valid_values[mask][:-1])
     # delta_f_mae = round(np.mean(np.abs(valid_values[mask][:-1] - reference_Delta_F)), 2)  
     # delta_f_std = round(np.std(valid_values[mask][:-1] - reference_Delta_F), 2)
-    delta_f_std = round(np.std(std_delta_fs[-1]))
+    delta_f_std = round(std_delta_fs[-1])
     
     # Plot
     if cfg.method == "tica":
-        fig_size = (6.8, 4)
+        fig_size = (4.8, 3)
     else:
         fig_size = RECTANGLE_FIGSIZE
     fig = plt.figure(figsize=fig_size, layout='constrained')
@@ -1037,14 +1039,14 @@ def main(cfg):
             logger.info("Skipping gmx trajectory post-processing and energy calculation...")
         
         # Run analysis functions
-        logger.info("Running CV analysis...")
-        plot_cv_over_time(cfg, log_dir, max_seed, analysis_dir)
+        # logger.info("Running CV analysis...")
+        # plot_cv_over_time(cfg, log_dir, max_seed, analysis_dir)
         
-        logger.info("Running RMSD analysis...")
-        plot_rmsd_analysis(cfg, log_dir, max_seed, analysis_dir)
+        # logger.info("Running RMSD analysis...")
+        # plot_rmsd_analysis(cfg, log_dir, max_seed, analysis_dir)
         
-        logger.info("Running TICA scatter analysis...")
-        plot_tica_scatter(cfg, log_dir, max_seed, analysis_dir)
+        # logger.info("Running TICA scatter analysis...")
+        # plot_tica_scatter(cfg, log_dir, max_seed, analysis_dir)
         
         logger.info("Running free energy analysis...")
         reference_cvs = compute_cv_values(cfg, max_seed, batch_size=10000)

@@ -36,10 +36,10 @@ if __name__ == "__main__":
     # parser.add_argument("--molecule", type=str, default="2JOF")
     # args = parser.parse_args()
     
-    method_list = ["ours"]
+    method_list = ["vde"]
     molecule_list = ["CLN025"]
     # method_list = ["tica", "tae", "vde",]
-    # molecule_list = ["CLN025","2JOF","1FME","GTT"]
+    # molecule_list = ["CLN025","2JOF","1FME"]
     device = "cuda:0"
     
     for molecule in molecule_list:
@@ -47,39 +47,41 @@ if __name__ == "__main__":
             date = None
             print(f"\nMethod: {method}, Molecule: {molecule}")
             batch_size_eval = 10000
-            if method != "ours":
-                mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/_baseline_/{method}-{molecule}-jit.pt", map_location=device)
-                mlcv_model.eval()
-            else:
-                if date is None:
-                    model_ckpt_mapping = {
-                        # "CLN025": "0914_094907",
-                        # "CLN025": "0917_061941",
-                        # "CLN025": "0919_161216",
-                        "CLN025": "0920_053441",
-                        # "2JOF": "0814_073849",
-                        "2JOF": "0917_150703",
-                        # "1FME": "0906_145917",
-                        "1FME": "0914_150513",
-                        # "1FME": "0917_150433",
-                        # "GTT": "0915_054124",
-                        # "GTT": "0917_150545",
-                        "GTT": "0919_170037",
-                    }
-                    date = model_ckpt_mapping[molecule]
-                mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/{date}-{molecule}-jit.pt", map_location=device)
-                mlcv_model.eval()
-            
             dataset_dir = Path(f"/home/shpark/prj-mlcv/lib/bioemu/opes/data/{molecule.upper()}")
             dataset_dir.mkdir(parents=True, exist_ok=True)
-            mlcv_save_path = dataset_dir / f"{method}_mlcv_{date}.npy"
+            if date is None:
+                model_ckpt_mapping = {
+                    # "CLN025": "0914_094907",
+                    # "CLN025": "0917_061941",
+                    # "CLN025": "0919_161216",
+                    "CLN025": "0920_053441",
+                    # "2JOF": "0814_073849",
+                    "2JOF": "0917_150703",
+                    # "1FME": "0906_145917",
+                    "1FME": "0914_150513",
+                    # "1FME": "0917_150433",
+                    # "GTT": "0915_054124",
+                    # "GTT": "0917_150545",
+                    "GTT": "0919_170037",
+                }
+                date = model_ckpt_mapping[molecule]
+            if method == "ours":
+                mlcv_save_path = dataset_dir / f"{method}_mlcv_{date}.npy"
+            else:
+                mlcv_save_path = dataset_dir / f"{method}_mlcv.npy"
             
-            # if os.path.exists(mlcv_save_path):
-            if False:
+            if os.path.exists(mlcv_save_path) and method == "ours":
                 print(f"> CV values already computed at {mlcv_save_path}")
                 cv = np.load(mlcv_save_path)
             
             else:
+                print(f"> Computing CV values")
+                if method != "ours":
+                    mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/_baseline_/{method}-{molecule}-jit.pt", map_location=device)
+                    mlcv_model.eval()
+                else:
+                    mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/{date}-{molecule}-jit.pt", map_location=device)
+                    mlcv_model.eval()
                 projection_data_path = f"/home/shpark/prj-mlcv/lib/DESRES/DESRES-Trajectory_{molecule}-0-protein/{molecule}-0-cad.pt"
                 projection_data = torch.load(projection_data_path).to(device)
                 eval_loader = DataLoader(
