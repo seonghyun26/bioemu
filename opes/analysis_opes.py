@@ -657,7 +657,8 @@ def plot_free_energy_curve(
         cv_thresh=reference_cv_thresh,
         T=equil_temp,
     )
-    delta_f_mae = round(np.mean(np.abs(valid_values[:-1] - reference_Delta_F)), 2)    
+    delta_f_mae = round(np.mean(np.abs(valid_values[:-1] - reference_Delta_F)), 2)  
+    delta_f_std = round(np.std(valid_values[:-1] - reference_Delta_F), 2)
     
     # Plot
     if cfg.method == "tda":
@@ -720,10 +721,10 @@ def plot_free_energy_curve(
     logger.info(f"Free energy curve saved to {analysis_dir}")
     log_info = {
         "free_energy_curve": wandb.Image(str(analysis_dir / f"{filename}.png")),
-        "free_energy_difference": round(mean_delta_fs[-1], 2),
-        "free_energy_difference_std": round(std_delta_fs[-1], 2),
         "free_energy_difference_reference": round(reference_Delta_F, 2),
-        "free_energy_difference_mae": delta_f_mae
+        "free_energy_difference": round(mean_delta_fs[-1], 2),
+        "free_energy_difference_mae": delta_f_mae,
+        "free_energy_difference_std": delta_f_std,
     }
     wandb.log(log_info)
     logger.info(pformat(log_info, indent=4, width=120))
