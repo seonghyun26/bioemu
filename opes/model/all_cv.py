@@ -54,13 +54,17 @@ if __name__ == "__main__":
                 if date is None:
                     model_ckpt_mapping = {
                         # "CLN025": "0914_094907",
-                        "CLN025": "0917_061941",
+                        # "CLN025": "0917_061941",
+                        # "CLN025": "0919_161216",
+                        "CLN025": "0920_053441",
                         # "2JOF": "0814_073849",
                         "2JOF": "0917_150703",
-                        "1FME": "0906_145917",
+                        # "1FME": "0906_145917",
+                        "1FME": "0914_150513",
                         # "1FME": "0917_150433",
                         # "GTT": "0915_054124",
-                        "GTT": "0917_150545",
+                        # "GTT": "0917_150545",
+                        "GTT": "0919_170037",
                     }
                     date = model_ckpt_mapping[molecule]
                 mlcv_model = torch.jit.load(f"/home/shpark/prj-mlcv/lib/bioemu/opes/model/{date}-{molecule}-jit.pt", map_location=device)

@@ -161,7 +161,7 @@ def format_plot_axes(
     
     # Tick parameters
     if not hide_ticks and not (hide_x_ticks and hide_y_ticks):
-        if model_type == "tda" and show_y_labels:
+        if model_type == "tica" and show_y_labels:
             # Show both x and y tick labels for TDA model
             ax.tick_params(axis='both', labelsize=fontsize)
         else:
@@ -779,7 +779,7 @@ def plot_tica_cv_analysis(
                 label="unfolded",
             )
             ax.set_xlabel("TIC 1", fontsize=FONTSIZE_SMALL)
-            if model_type == "tda":
+            if model_type == "tica":
                 ax.set_ylabel("TIC 2", fontsize=FONTSIZE_SMALL)
             ax.yaxis.set_major_locator(MaxNLocator(integer=True, nbins=4, min_n_ticks=2))
             
@@ -787,7 +787,7 @@ def plot_tica_cv_analysis(
             format_plot_axes(
                 ax, fig=fig, 
                 model_type=model_type, 
-                show_y_labels=(model_type == "tda"),
+                show_y_labels=(model_type == "tica"),
                 align_ylabels=True
             )
             save_plot_dual_format(
@@ -1040,7 +1040,7 @@ def plot_bond_analysis(
 
         ax.set_xlabel("Bond Number", fontsize=FONTSIZE_SMALL)
         ax.set_xticks([0, 1, 2, 3, 4, 5, 6, 7])
-        if model_type == "tda":
+        if model_type == "tica":
             ax.set_ylabel("CV", fontsize=FONTSIZE_SMALL)
             ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
         
@@ -1048,7 +1048,7 @@ def plot_bond_analysis(
         format_plot_axes(
             ax, fig=fig, 
             model_type=model_type, 
-            show_y_labels=(model_type == "tda"),
+            show_y_labels=(model_type == "tica"),
             align_ylabels=True
         )
         # ax.set_title(f"CV {cv_dim} vs Bond Number - {model_type.upper()}")
@@ -1118,14 +1118,14 @@ def plot_committor_analysis(
         ax.set_xticks([0.00, 0.25, 0.50, 0.75, 1.00])
         ax.set_xlabel("Committor", fontsize=FONTSIZE_SMALL)
         ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
-        if model_type == "tda":
+        if model_type == "tica":
             ax.set_ylabel(f"CV {cv_dim}", fontsize=FONTSIZE_SMALL)
         
         # Apply consistent formatting
         format_plot_axes(
             ax, fig=fig, 
             model_type=model_type, 
-            show_y_labels=(model_type == "tda"),
+            show_y_labels=(model_type == "tica"),
             align_ylabels=True
         )
 
@@ -1218,13 +1218,13 @@ def plot_rmsd_analysis(
         # ax.set_xticks([0.00, 0.25, 0.50, 0.75, 1.00])
         ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=4))
         ax.set_xlabel(f"RMSD", fontsize=FONTSIZE_SMALL)
-        if model_type == "tda":
+        if model_type == "tica":
             ax.set_ylabel(f"CV", fontsize=FONTSIZE_SMALL)
             ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
         format_plot_axes(
             ax, fig=fig, 
             model_type=model_type, 
-            show_y_labels=(model_type == "tda"),
+            show_y_labels=(model_type == "tica"),
             align_ylabels=True
         )
         
@@ -1398,13 +1398,13 @@ def plot_dssp_simplified_violin_analysis(
         # ax.set_title(f'CV {cv_dim} Distribution by DSSP Simplified Secondary Structure - {model_type.upper()}')
         ax.set_xticks(range(len(violin_labels)))
         ax.set_xticklabels(violin_labels, rotation=45, fontsize=FONTSIZE_SMALL)
-        if model_type == "tda":
+        if model_type == "tica":
             ax.set_ylabel(f'CV', fontsize=FONTSIZE_SMALL)
         ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
         format_plot_axes(
             ax, fig=fig, 
             model_type=model_type, 
-            show_y_labels=(model_type == "tda"),
+            show_y_labels=(model_type == "tica"),
             align_ylabels=True
         )
         save_plot_dual_format(
@@ -1586,7 +1586,7 @@ def plot_per_residue_violin_analysis(
             print(stats_text)
             
             # Create violin plot
-            if model_type == "tda":
+            if model_type == "tica":
                 fig_size = (3.8, 3)
             else:
                 fig_size = (3, 3)
@@ -1604,12 +1604,12 @@ def plot_per_residue_violin_analysis(
             ax.set_xticks(range(1, len(existing_labels)+1), labels=existing_labels, fontsize=FONTSIZE_SMALL)
             ax.set_yticks([-1.0, 0.0, 1.0])
             ax.yaxis.set_major_locator(MaxNLocator(integer=True, nbins=3))
-            if model_type == "tda":
+            if model_type == "tica":
                 ax.set_ylabel(f'CVs', fontsize=FONTSIZE_SMALL)
             format_plot_axes(
                 ax, fig=fig, 
                 model_type=model_type, 
-                show_y_labels=(model_type == "tda"),
+                show_y_labels=(model_type == "tica"),
                 align_ylabels=True
             )
             save_plot_dual_format(
@@ -1792,7 +1792,7 @@ def plot_folded_unfolded_violin_analysis(
         cv_folded = cv[folded_indices, cv_dim]
         cv_unfolded = cv[unfolded_indices, cv_dim]
         
-        if model_type == "tda":
+        if model_type == "tica":
             fig_size = (3.2, 3)
         else:
             fig_size = (2.4, 3)
@@ -1807,7 +1807,7 @@ def plot_folded_unfolded_violin_analysis(
         format_violin_parts(violin_parts, means=False, medians=False, extrema=True)
         ax.set_xticks(range(len(violin_labels)))
         ax.set_xticklabels(violin_labels, fontsize=FONTSIZE_SMALL)
-        if model_type == "tda":
+        if model_type == "tica":
             ax.set_ylabel(f'CV', fontsize=FONTSIZE_SMALL)
         ax.set_yticks([-1.0, 0, 1.0])
         ax.set_ylim(-1.1, 1.1)
@@ -1832,7 +1832,7 @@ def plot_folded_unfolded_violin_analysis(
         format_plot_axes(
             ax, fig=fig, 
             model_type=model_type, 
-            show_y_labels=(model_type == "tda"),
+            show_y_labels=(model_type == "tica"),
             align_ylabels=True
         )
         save_plot_dual_format(

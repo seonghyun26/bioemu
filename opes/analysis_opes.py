@@ -494,7 +494,7 @@ def plot_pmf(
     pmf_mae = np.mean(np.abs(mean_pmf[pmf_mask] - reference_pmf[pmf_mask]))
 
     print(f"> Plotting PMF")
-    if cfg.method == "tda":
+    if cfg.method == "tica":
         fig_size = (6.8, 4)
     else:
         fig_size = RECTANGLE_FIGSIZE
@@ -535,7 +535,7 @@ def plot_pmf(
     format_plot_axes(
         ax, fig=fig, 
         model_type=cfg.method, 
-        show_y_labels=(cfg.method == "tda"),
+        show_y_labels=(cfg.method == "tica"),
         align_ylabels=True
     )
     save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
@@ -657,11 +657,14 @@ def plot_free_energy_curve(
         cv_thresh=reference_cv_thresh,
         T=equil_temp,
     )
-    delta_f_mae = round(np.mean(np.abs(valid_values[:-1] - reference_Delta_F)), 2)  
-    delta_f_std = round(np.std(valid_values[:-1] - reference_Delta_F), 2)
+    mask = ~np.isnan(valid_values)
+    print(valid_values[mask][:-1])
+    # delta_f_mae = round(np.mean(np.abs(valid_values[mask][:-1] - reference_Delta_F)), 2)  
+    # delta_f_std = round(np.std(valid_values[mask][:-1] - reference_Delta_F), 2)
+    delta_f_std = round(np.std(std_delta_fs[-1]))
     
     # Plot
-    if cfg.method == "tda":
+    if cfg.method == "tica":
         fig_size = (6.8, 4)
     else:
         fig_size = RECTANGLE_FIGSIZE
@@ -712,7 +715,7 @@ def plot_free_energy_curve(
     format_plot_axes(
         ax, fig=fig, 
         model_type=cfg.method, 
-        show_y_labels=(cfg.method == "tda"),
+        show_y_labels=(cfg.method == "tica"),
         align_ylabels=True
     )
     
@@ -723,8 +726,8 @@ def plot_free_energy_curve(
         "free_energy_curve": wandb.Image(str(analysis_dir / f"{filename}.png")),
         "free_energy_difference_reference": round(reference_Delta_F, 2),
         "free_energy_difference": round(mean_delta_fs[-1], 2),
-        "free_energy_difference_mae": delta_f_mae,
         "free_energy_difference_std": delta_f_std,
+        # "free_energy_difference_mae": delta_f_mae,
     }
     wandb.log(log_info)
     logger.info(pformat(log_info, indent=4, width=120))
@@ -797,7 +800,7 @@ def plot_rmsd_analysis(
             format_plot_axes(
                 ax, fig=fig, 
                 model_type=cfg.method, 
-                show_y_labels=(cfg.method == "tda"),
+                show_y_labels=(cfg.method == "tica"),
                 align_ylabels=True
             )
             
@@ -901,7 +904,7 @@ def plot_tica_scatter(
             format_plot_axes(
                 ax, fig=fig, 
                 model_type=cfg.method, 
-                show_y_labels=(cfg.method == "tda"),
+                show_y_labels=(cfg.method == "tica"),
                 align_ylabels=True
             )
             save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
@@ -962,7 +965,7 @@ def plot_cv_over_time(
             format_plot_axes(
                 ax, fig=fig, 
                 model_type=cfg.method, 
-                show_y_labels=(cfg.method == "tda"),
+                show_y_labels=(cfg.method == "tica"),
                 align_ylabels=True
             )
             save_plot_dual_format(str(analysis_dir), filename_time, dpi=300, bbox_inches="tight")
@@ -982,7 +985,7 @@ def plot_cv_over_time(
             format_plot_axes(
                 ax, fig=fig, 
                 model_type=cfg.method, 
-                show_y_labels=(cfg.method == "tda"),
+                show_y_labels=(cfg.method == "tica"),
                 align_ylabels=True
             )
             save_plot_dual_format(str(analysis_dir), filename_histogram, dpi=300, bbox_inches="tight")
