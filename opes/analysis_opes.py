@@ -793,7 +793,7 @@ def plot_rmsd_analysis(
             time_grid = np.linspace(0, final_time, num=len(rmsd_values))
             
             # Plot RMSD over time
-            fig = plt.figure(figsize=(5, 3))
+            fig = plt.figure(figsize=(RECTANGLE_FIGSIZE))
             ax = fig.add_subplot(111)
             plt.plot(time_grid, rmsd_values, color=blue, linewidth=4, label='RMSD')
             ax.set_xlabel('Time (ns)', fontsize=FONTSIZE_SMALL)
@@ -890,7 +890,7 @@ def plot_tica_scatter(
                 continue
         
             # Create plot
-            fig = plt.figure(figsize=(4, 4))
+            fig = plt.figure(figsize=(SQUARE_FIGSIZE))
             ax = fig.add_subplot(111)
             h = ax.hist2d(
                 tica_coord_full[:, 0], tica_coord_full[:, 1], 
@@ -957,7 +957,7 @@ def plot_cv_over_time(
             
             # Plot - CV over time
             # if not check_image_exists(str(analysis_dir), filename_time):
-            fig = plt.figure(figsize=(5, 3))
+            fig = plt.figure(figsize=(RECTANGLE_FIGSIZE))
             ax = fig.add_subplot(111)
             ax.plot(time, cv, label=f"CV", alpha=0.8, linewidth=4, color=blue)
             ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=7))
@@ -979,7 +979,7 @@ def plot_cv_over_time(
             
             # Plot - CV histogram
             # if not check_image_exists(str(analysis_dir), filename_histogram):
-            fig = plt.figure(figsize=(5, 3))
+            fig = plt.figure(figsize=(RECTANGLE_FIGSIZE))
             ax = fig.add_subplot(111)
             ax.hist(cv, bins=50, alpha=0.7, color=blue, edgecolor='black', log=True)
             ax.set_xlabel("CV Values", fontsize=FONTSIZE_SMALL)

@@ -19,10 +19,11 @@ python main.py \
 
 wait 
 
-python analysis_opes.py \
-    --config-name $method-$molecule \
-    date=$date \
-    +tags=['debug'] \
-    opes.max_seed=$max_seed \
-    analysis.skip_steps=10 \
-    analysis.unit_steps=10
+# python analysis_opes.py \
+#     --config-name $method-$molecule \
+#     date=$date \
+#     +tags=['debug'] \
+#     opes.max_seed=$max_seed \
+#     analysis.gmx=False \
+#     analysis.skip_steps=10 \
+#     analysis.unit_steps=10
