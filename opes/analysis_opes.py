@@ -530,7 +530,7 @@ def plot_pmf(
     ax.spines['right'].set_visible(False)
     ax.tick_params(axis='both', labelsize=FONTSIZE_SMALL)
     ax.set_xlabel("CV", fontsize=FONTSIZE_SMALL)
-    ax.set_yticks([0, 1, 20, 30])
+    ax.set_yticks([0, 10, 20, 30])
     ax.set_ylim(-5, 30)
     ax.set_ylabel("PMF [kJ/mol]", fontsize=FONTSIZE_SMALL)
     plt.grid(True, alpha=0.3)
