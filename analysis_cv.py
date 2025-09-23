@@ -1034,9 +1034,14 @@ def plot_bond_analysis(
         grouped = [x[y == i] for i in sorted(np.unique(y))]
         violin_parts = plt.violinplot(
             grouped, positions=sorted(np.unique(y)),
-            showmeans=True, showmedians=False, showextrema=True,
+            showmeans=False, showmedians=True, showextrema=True,
         )
-        format_violin_parts(violin_parts)
+        format_violin_parts(
+            violin_parts,
+            means=False,
+            medians=True,
+            extrema=True,
+        )
 
         ax.set_xlabel("Bond Number", fontsize=FONTSIZE_SMALL)
         ax.set_xticks([0, 1, 2, 3, 4, 5, 6, 7])
@@ -1119,7 +1124,7 @@ def plot_committor_analysis(
         ax.set_xlabel("Committor", fontsize=FONTSIZE_SMALL)
         ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
         if model_type == "tica":
-            ax.set_ylabel(f"CV {cv_dim}", fontsize=FONTSIZE_SMALL)
+            ax.set_ylabel(f"CV", fontsize=FONTSIZE_SMALL)
         
         # Apply consistent formatting
         format_plot_axes(
@@ -1794,33 +1799,47 @@ def plot_folded_unfolded_violin_analysis(
         
         if model_type == "tica":
             fig_size = (3.2, 3)
+        elif model_type == "vde":
+            fig_size = (3.2, 2.2)
         else:
             fig_size = (2.4, 3)
         fig = plt.figure(figsize=fig_size, layout='constrained')
         ax = fig.add_subplot(111)
         violin_data = [cv_folded, cv_unfolded]
-        violin_labels = ['Folded', 'Unfolded']
+        if model_type == "vde":
+            violin_labels = ["N", "U"]
+        else:
+            violin_labels = ['Folded', 'Unfolded']
         violin_parts = ax.violinplot(
             violin_data, positions=range(len(violin_data)), widths=0.8,
             showmeans=False, showmedians=False, showextrema=True,
+            vert=False
         )
         format_violin_parts(violin_parts, means=False, medians=False, extrema=True)
-        ax.set_xticks(range(len(violin_labels)))
-        ax.set_xticklabels(violin_labels, fontsize=FONTSIZE_SMALL)
-        if model_type == "tica":
-            ax.set_ylabel(f'CV', fontsize=FONTSIZE_SMALL)
-        ax.set_yticks([-1.0, 0, 1.0])
-        ax.set_ylim(-1.1, 1.1)
+        ax.set_yticks(range(len(violin_labels)))
+        ax.set_yticklabels(violin_labels, fontsize=FONTSIZE_SMALL, rotation=90, va="center", ha="center")
+        if model_type == "tica" or model_type == "vde":
+            ax.set_xlabel(f'{molecule.upper()} CV', fontsize=FONTSIZE_SMALL)
+        ax.set_xticks([-1.0, 0, 1.0])
+        ax.set_xlim(-1.1, 1.1)
+        if model_type == "vde":
+            for label in ax.get_yticklabels():
+                label.set_horizontalalignment("right")
+                label.set_x(label.get_position()[0] - 0.05)
         # ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
     
         folded_mean = np.mean(cv_folded)
         unfolded_mean = np.mean(cv_unfolded)
         folded_std = np.std(cv_folded)
         unfolded_std = np.std(cv_unfolded)
-        ax.scatter(0, folded_mean, color="k", zorder=3, marker="o", s=40, label="mean" if 0 == 0 else "")
-        ax.scatter(1, unfolded_mean, color="k", zorder=3, marker="o", s=40, label="mean" if 1 == 0 else "")
-        ax.errorbar(0, folded_mean, yerr=folded_std, color="k", capsize=5, fmt="none", zorder=2)
-        ax.errorbar(1, unfolded_mean, yerr=unfolded_std, color="k", capsize=5, fmt="none", zorder=2)
+        # ax.scatter(0, folded_mean, color="k", zorder=3, marker="o", s=40, label="mean" if 0 == 0 else "")
+        # ax.scatter(1, unfolded_mean, color="k", zorder=3, marker="o", s=40, label="mean" if 1 == 0 else "")
+        # ax.errorbar(0, folded_mean, yerr=folded_std, color="k", capsize=5, fmt="none", zorder=2)
+        # ax.errorbar(1, unfolded_mean, yerr=unfolded_std, color="k", capsize=5, fmt="none", zorder=2)
+        ax.scatter(folded_mean, 0, color="k", zorder=3, marker="o", s=40, label="mean" if 0 == 0 else "")
+        ax.scatter(unfolded_mean, 1, color="k", zorder=3, marker="o", s=40, label="mean" if 1 == 0 else "")
+        ax.errorbar(folded_mean, 0, yerr=folded_std, color="k", capsize=5, fmt="none", zorder=2)
+        ax.errorbar(unfolded_mean, 1, yerr=unfolded_std, color="k", capsize=5, fmt="none", zorder=2)
         stats_text = f'Folded: μ={folded_mean:.3f}, σ={folded_std:.3f}\nUnfolded: μ={unfolded_mean:.3f}, σ={unfolded_std:.3f}'
         print(stats_text)
         # ax.text(
@@ -1832,7 +1851,7 @@ def plot_folded_unfolded_violin_analysis(
         format_plot_axes(
             ax, fig=fig, 
             model_type=model_type, 
-            show_y_labels=(model_type == "tica"),
+            show_y_labels=(model_type == "tica" or model_type == "vde"),
             align_ylabels=True
         )
         save_plot_dual_format(
@@ -1970,11 +1989,11 @@ def main():
     print(f"Plots to generate: {plots_to_generate}")
     
     # model_types = ['tica', 'tae', 'vde'] if args.model_type == 'partial' else [args.model_type]
-    model_types = ['ours', 'tda', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
+    model_types = ['ours', 'tica', 'tae', 'vde'] if args.model_type == 'all' else [args.model_type]
     if args.molecule == 'all':
-        molecules = ['CLN025', '2JOF', '1FME', 'GTT']
+        molecules = ['CLN025', '2JOF', '1FME']
     elif args.molecule == 'partial':
-        molecules = ['1FME', 'GTT']
+        molecules = ['CLN025', '2JOF', '1FME']
     else:
         molecules = [args.molecule]
     

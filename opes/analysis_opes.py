@@ -497,7 +497,7 @@ def plot_pmf(
 
     print(f"> Plotting PMF")
     if cfg.method == "tica":
-        fig_size = (3.8, 2)
+        fig_size = (4.8, 3)
     else:
         fig_size = RECTANGLE_FIGSIZE
     fig = plt.figure(figsize=fig_size, layout='constrained')
@@ -530,8 +530,8 @@ def plot_pmf(
     ax.spines['right'].set_visible(False)
     ax.tick_params(axis='both', labelsize=FONTSIZE_SMALL)
     ax.set_xlabel("CV", fontsize=FONTSIZE_SMALL)
-    ax.set_yticks([0, 15, 30, 45])
-    ax.set_ylim(-5, 50)
+    ax.set_yticks([0, 1, 20, 30])
+    ax.set_ylim(-5, 30)
     ax.set_ylabel("PMF [kJ/mol]", fontsize=FONTSIZE_SMALL)
     plt.grid(True, alpha=0.3)
     format_plot_axes(
@@ -706,8 +706,8 @@ def plot_free_energy_curve(
         )
     ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
     ax.set_xlim(0.0, time_axis[-1])
-    ax.set_yticks([-15, 0, 15, 30])
-    ax.set_ylim(-20, 35)
+    ax.set_yticks([-10, 0, 10, 20])
+    ax.set_ylim(-15, 25)
     ax.set_ylabel(r'$\Delta F$ [kJ/mol]', fontsize=FONTSIZE_SMALL)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
