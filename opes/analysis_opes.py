@@ -513,7 +513,7 @@ def plot_pmf(
     )
     for idx, pmf in enumerate(all_pmfs):
         ax.plot(
-            cv_grid[~all_nan_cols], pmf,
+            cv_grid[~all_nan_cols], pmf[~all_nan_cols],
             color=blue, linewidth=2, alpha=0.2,
             label=f"OPES {idx}",
             zorder=2,
