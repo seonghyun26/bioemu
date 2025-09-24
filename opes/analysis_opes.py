@@ -665,7 +665,7 @@ def plot_free_energy_curve(
     print(valid_values[mask][:-1])
     # delta_f_mae = round(np.mean(np.abs(valid_values[mask][:-1] - reference_Delta_F)), 2)  
     # delta_f_std = round(np.std(valid_values[mask][:-1] - reference_Delta_F), 2)
-    delta_f_std = round(std_delta_fs[-1])
+    delta_f_std = round(std_delta_fs[-1], 2)
     
     # Plot
     if cfg.method == "tica":
