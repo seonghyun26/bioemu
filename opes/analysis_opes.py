@@ -349,14 +349,15 @@ def compute_cv_values(
         #     date = "0905_160702"
         #     cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
         # date = cfg.ckpt_path.split("-")[0]
+        print(f"> Using CV values from {ckpt_date}")
         cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{ckpt_date}.npy"
     else:
         cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv.npy"
+    
     if os.path.exists(cv_path):
         print(f"> Using cached CV values from {cv_path}")
         cv = np.load(cv_path)
         return cv
-    
     else:
         print(f"> Computing CV values")
         try:
