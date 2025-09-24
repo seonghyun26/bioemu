@@ -107,7 +107,7 @@ def format_plot_axes(
     
     # Tick parameters
     if not hide_ticks and not (hide_x_ticks and hide_y_ticks):
-        if model_type == "tda" and show_y_labels:
+        if model_type == "tica" and show_y_labels:
             # Show both x and y tick labels for TDA model
             ax.tick_params(axis='both', labelsize=fontsize)
         else:
@@ -478,6 +478,7 @@ def plot_pmf(
         pmf -= pmf.min()
         all_pmfs.append(pmf)
     all_pmfs = np.array(all_pmfs)
+    print(all_pmfs)
     mean_pmf = np.nanmean(all_pmfs, axis=0)
     std_pmf = np.nanstd(all_pmfs, axis=0)
     

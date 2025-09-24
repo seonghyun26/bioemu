@@ -1798,18 +1798,13 @@ def plot_folded_unfolded_violin_analysis(
         cv_unfolded = cv[unfolded_indices, cv_dim]
         
         if model_type == "tica":
-            fig_size = (3.2, 3)
-        elif model_type == "vde":
-            fig_size = (3.2, 2.2)
+            fig_size = (3.6, 3)
         else:
-            fig_size = (2.4, 3)
+            fig_size = (3.2, 3)
         fig = plt.figure(figsize=fig_size, layout='constrained')
         ax = fig.add_subplot(111)
         violin_data = [cv_folded, cv_unfolded]
-        if model_type == "vde":
-            violin_labels = ["N", "U"]
-        else:
-            violin_labels = ['Folded', 'Unfolded']
+        violin_labels = ['Folded', 'Unfolded']
         violin_parts = ax.violinplot(
             violin_data, positions=range(len(violin_data)), widths=0.8,
             showmeans=False, showmedians=False, showextrema=True,
@@ -1818,11 +1813,11 @@ def plot_folded_unfolded_violin_analysis(
         format_violin_parts(violin_parts, means=False, medians=False, extrema=True)
         ax.set_yticks(range(len(violin_labels)))
         ax.set_yticklabels(violin_labels, fontsize=FONTSIZE_SMALL, rotation=90, va="center", ha="center")
-        if model_type == "tica" or model_type == "vde":
-            ax.set_xlabel(f'{molecule.upper()} CV', fontsize=FONTSIZE_SMALL)
-        ax.set_xticks([-1.0, 0, 1.0])
+        if molecule == "1FME":
+            ax.set_xlabel(f'CVs', fontsize=FONTSIZE_SMALL)
+            ax.set_xticks([-1.0, 0, 1.0])
         ax.set_xlim(-1.1, 1.1)
-        if model_type == "vde":
+        if model_type == "tica":
             for label in ax.get_yticklabels():
                 label.set_horizontalalignment("right")
                 label.set_x(label.get_position()[0] - 0.05)
@@ -1838,8 +1833,8 @@ def plot_folded_unfolded_violin_analysis(
         # ax.errorbar(1, unfolded_mean, yerr=unfolded_std, color="k", capsize=5, fmt="none", zorder=2)
         ax.scatter(folded_mean, 0, color="k", zorder=3, marker="o", s=40, label="mean" if 0 == 0 else "")
         ax.scatter(unfolded_mean, 1, color="k", zorder=3, marker="o", s=40, label="mean" if 1 == 0 else "")
-        ax.errorbar(folded_mean, 0, yerr=folded_std, color="k", capsize=5, fmt="none", zorder=2)
-        ax.errorbar(unfolded_mean, 1, yerr=unfolded_std, color="k", capsize=5, fmt="none", zorder=2)
+        ax.errorbar(folded_mean, 0, xerr=folded_std, color="k", capsize=5, fmt="none", zorder=2)
+        ax.errorbar(unfolded_mean, 1, xerr=unfolded_std, color="k", capsize=5, fmt="none", zorder=2)
         stats_text = f'Folded: μ={folded_mean:.3f}, σ={folded_std:.3f}\nUnfolded: μ={unfolded_mean:.3f}, σ={unfolded_std:.3f}'
         print(stats_text)
         # ax.text(
@@ -1851,7 +1846,7 @@ def plot_folded_unfolded_violin_analysis(
         format_plot_axes(
             ax, fig=fig, 
             model_type=model_type, 
-            show_y_labels=(model_type == "tica" or model_type == "vde"),
+            show_y_labels=(model_type == "tica"),
             align_ylabels=True
         )
         save_plot_dual_format(
