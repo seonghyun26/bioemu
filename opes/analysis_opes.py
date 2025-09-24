@@ -322,6 +322,7 @@ def compute_cv_values(
     cfg,
     max_seed: int,
     batch_size=10000,
+    ckpt_date=None
 ):
     """
     Compute reference CV values using batch processing to prevent GPU memory issues.
@@ -347,8 +348,8 @@ def compute_cv_values(
         #     # date = "0917_150545"
         #     date = "0905_160702"
         #     cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
-        date = cfg.ckpt_path.split("-")[0]
-        cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{date}.npy"
+        # date = cfg.ckpt_path.split("-")[0]
+        cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv_{ckpt_date}.npy"
     else:
         cv_path = f"./data/{cfg.molecule.upper()}/{cfg.method}_mlcv.npy"
     if os.path.exists(cv_path):
@@ -1020,6 +1021,7 @@ def main(cfg):
     analysis_dir.mkdir(parents=True, exist_ok=True)
     max_seed = cfg.opes.max_seed
     sigma = cfg.opes.sigma
+    ckpt_date = cfg.ckpt_date
     
     # Initialize wandb
     config = OmegaConf.to_container(cfg)
@@ -1049,7 +1051,7 @@ def main(cfg):
         # plot_tica_scatter(cfg, log_dir, max_seed, analysis_dir)
         
         logger.info("Running free energy analysis...")
-        reference_cvs = compute_cv_values(cfg, max_seed, batch_size=10000)
+        reference_cvs = compute_cv_values(cfg, max_seed, batch_size=10000, ckpt_date=ckpt_date)
         plot_free_energy_curve(cfg, log_dir, max_seed, analysis_dir, reference_cvs)
         plot_pmf(cfg, sigma, log_dir, max_seed, analysis_dir, reference_cvs)
         
