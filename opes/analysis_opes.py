@@ -521,7 +521,7 @@ def plot_pmf(
             zorder=2,
         )
     ax.plot(
-        cv_grid, reference_pmf[pmf_mask],
+        cv_grid[pmf_mask], reference_pmf[pmf_mask],
         color=COLORS[1], linewidth=3, linestyle="--",
         label="Reference",
         zorder=6,
