@@ -478,9 +478,9 @@ def plot_pmf(
         pmf -= pmf.min()
         all_pmfs.append(pmf)
     all_pmfs = np.array(all_pmfs)
-    print(all_pmfs)
-    mean_pmf = np.nanmean(all_pmfs, axis=0)
-    std_pmf = np.nanstd(all_pmfs, axis=0)
+    all_nan_cols = np.all(np.isnan(all_pmfs), axis=0)
+    mean_pmf = np.nanmean(all_pmfs[:, ~all_nan_cols], axis=0)
+    std_pmf = np.nanstd(all_pmfs[:, ~all_nan_cols], axis=0)
     
     # Compute reference PMF
     print(f"> Computing reference PMF")
@@ -492,11 +492,8 @@ def plot_pmf(
     )
     reference_pmf -= reference_pmf.min()
     reference_mask = ~np.isnan(reference_pmf) & (reference_pmf < 25)
-    mean_pmf_mask = ~np.isnan(mean_pmf)
-    pmf_mask = reference_mask & mean_pmf_mask
-    pmf_mae = np.mean(np.abs(all_pmfs[:, pmf_mask] - reference_pmf[pmf_mask]))
-    # pmf_mae2 = np.mean(np.abs(mean_pmf[pmf_mask] - reference_pmf[pmf_mask]))
-    # pmf_std2 = np.std(all_pmfs[:, pmf_mask] - reference_pmf[pmf_mask])
+    pmf_mask = reference_mask & ~all_nan_cols
+    pmf_mae = np.nanmean(np.abs(all_pmfs[:, pmf_mask] - reference_pmf[pmf_mask]))
 
     print(f"> Plotting PMF")
     if cfg.method == "tica":
