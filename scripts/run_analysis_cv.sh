@@ -10,9 +10,13 @@
 set -e  # Exit on any error
 
 # Default values
+CUDA_DEVICE=${1:-0}
 MODEL_TYPE=${2:-all}
 MOLECULE=${3:-CLN025}
-DATE=${4:-}
+OVERWRITE=${4:-False}
+PLOTS=${5:-all}
+PLOT_3D=${6:-False}
+DATE=${7:-}
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +34,8 @@ echo "Running CV Analysis"
 echo "========================================"
 echo "Model type: $MODEL_TYPE"
 echo "Molecule: $MOLECULE"
+echo "Overwrite: $OVERWRITE"
+echo "Plots: $PLOTS"
 echo "Date: ${DATE:-'default'}"
 echo "Image directory: $IMG_DIR"
 echo "========================================"
@@ -40,8 +46,19 @@ if [ ! -f "$PYTHON_SCRIPT" ]; then
     exit 1
 fi
 
-# Build command
-CMD="CUDA_VISIBLE_DEVICES=$1 python3 $PYTHON_SCRIPT --model_type $MODEL_TYPE --molecule $MOLECULE --img_dir $IMG_DIR --plot_3d True"
+# Build command with proper handling of multiple plots
+CMD="CUDA_VISIBLE_DEVICES=$CUDA_DEVICE python3 $PYTHON_SCRIPT --model_type $MODEL_TYPE --molecule $MOLECULE --img_dir $IMG_DIR --overwrite $OVERWRITE --plot_3d $PLOT_3D" 
+
+# Add plots parameter - handle both single plot and multiple plots
+if [ "$PLOTS" = "all" ]; then
+    CMD="$CMD --plots all"
+else
+    # Split plots by space and add each one
+    CMD="$CMD --plots"
+    for plot in $PLOTS; do
+        CMD="$CMD $plot"
+    done
+fi
 
 # Add date parameter if provided
 if [ -n "$DATE" ]; then
