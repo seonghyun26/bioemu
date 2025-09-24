@@ -478,8 +478,8 @@ def plot_pmf(
         pmf -= pmf.min()
         all_pmfs.append(pmf)
     all_pmfs = np.array(all_pmfs)
-    mean_pmf = np.mean(all_pmfs, axis=0)
-    std_pmf = np.std(all_pmfs, axis=0)
+    mean_pmf = np.nanmean(all_pmfs, axis=0)
+    std_pmf = np.nanstd(all_pmfs, axis=0)
     
     # Compute reference PMF
     print(f"> Computing reference PMF")
@@ -521,7 +521,7 @@ def plot_pmf(
             zorder=2,
         )
     ax.plot(
-        cv_grid, reference_pmf,
+        cv_grid, reference_pmf[pmf_mask],
         color=COLORS[1], linewidth=3, linestyle="--",
         label="Reference",
         zorder=6,
