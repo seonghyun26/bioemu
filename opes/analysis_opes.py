@@ -503,17 +503,17 @@ def plot_pmf(
     fig = plt.figure(figsize=fig_size, layout='constrained')
     ax = fig.add_subplot(111)
     ax.plot(
-        cv_grid, mean_pmf,
+        cv_grid[~all_nan_cols], mean_pmf,
         color=blue, linewidth=4,
         zorder=4,
     )
     ax.fill_between(
-        cv_grid, mean_pmf - std_pmf, mean_pmf + std_pmf,
+        cv_grid[~all_nan_cols], mean_pmf - std_pmf, mean_pmf + std_pmf,
         alpha=0.2, color=blue, linewidth=1,
     )
     for idx, pmf in enumerate(all_pmfs):
         ax.plot(
-            cv_grid, pmf,
+            cv_grid[~all_nan_cols], pmf,
             color=blue, linewidth=2, alpha=0.2,
             label=f"OPES {idx}",
             zorder=2,
