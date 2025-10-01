@@ -921,6 +921,171 @@ def plot_tica_scatter(
             raise    
 
 
+def plot_opes_progress(
+    cfg,
+    log_dir: Path,
+    max_seed: int,
+    analysis_dir: Path,
+):
+    """Plot OPES simulation progress including CV exploration, bias evolution, and simulation statistics"""
+    logger.info("Creating OPES progress plots...")
+    
+    filename = "opes_progress"
+    print(f"> Computing OPES progress")
+    
+    # Collect data from all seeds
+    all_times = []
+    all_cvs = []
+    all_biases = []
+    all_cv_ranges = []
+    all_bias_evolutions = []
+    simulation_stats = {}
+    
+    pbar = tqdm(
+        range(max_seed + 1),
+        desc="Collecting OPES progress data"
+    )
+    
+    for seed in pbar:
+        colvar_file = log_dir / f"{seed}" / "COLVAR"
+        if not colvar_file.exists():
+            logger.warning(f"COLVAR file not found: {seed}")
+            continue
+            
+        try:
+            colvar_data = np.genfromtxt(colvar_file, skip_header=1)
+            time = colvar_data[:, 0] / 1000  # Convert to ns
+            cv = colvar_data[:, 1]
+            bias = colvar_data[:, 2]
+            
+            # Calculate CV exploration range over time
+            cv_cumulative_min = np.minimum.accumulate(cv)
+            cv_cumulative_max = np.maximum.accumulate(cv)
+            cv_range = cv_cumulative_max - cv_cumulative_min
+            
+            # Calculate bias evolution (rolling average)
+            window_size = min(1000, len(bias) // 10)  # 10% of trajectory or 1000 steps
+            if window_size > 1:
+                bias_rolling = np.convolve(bias, np.ones(window_size)/window_size, mode='valid')
+                bias_time = time[window_size-1:]
+            else:
+                bias_rolling = bias
+                bias_time = time
+            
+            all_times.append(time)
+            all_cvs.append(cv)
+            all_biases.append(bias)
+            all_cv_ranges.append(cv_range)
+            all_bias_evolutions.append((bias_time, bias_rolling))
+            
+            # Collect simulation statistics
+            simulation_stats[seed] = {
+                'total_time': time[-1] if len(time) > 0 else 0,
+                'total_steps': len(time),
+                'cv_min': np.min(cv),
+                'cv_max': np.max(cv),
+                'cv_range': np.max(cv) - np.min(cv),
+                'bias_min': np.min(bias),
+                'bias_max': np.max(bias),
+                'final_bias': bias[-1] if len(bias) > 0 else 0,
+            }
+            
+        except Exception as e:
+            logger.warning(f"Error processing data for seed {seed}: {e}")
+            continue
+    
+    if not all_times:
+        logger.warning("No valid COLVAR data found for progress analysis")
+        return
+    
+    # Create comprehensive progress plot (2x2) with right-side summary panel
+    fig = plt.figure(figsize=(16, 9))
+    gs = fig.add_gridspec(2, 3, width_ratios=[1.0, 1.0, 0.8], wspace=0.3, hspace=0.35)
+
+    # 1. CV exploration over time (all seeds)
+    ax1 = fig.add_subplot(gs[0, 0])
+    for i, (time, cv) in enumerate(zip(all_times, all_cvs)):
+        ax1.plot(time, cv, alpha=0.7, linewidth=1, color=blue)
+    ax1.set_xlabel("Time (ns)", fontsize=FONTSIZE_SMALL)
+    ax1.set_ylabel("CV Value", fontsize=FONTSIZE_SMALL)
+    ax1.set_title("CV Exploration", fontsize=FONTSIZE_SMALL)
+    format_plot_axes(ax1, fig=fig, model_type=cfg.method, show_y_labels=(cfg.method == "tica"))
+
+    # 2. CV range evolution (exploration breadth)
+    ax2 = fig.add_subplot(gs[0, 1])
+    for i, (time, cv_range) in enumerate(zip(all_times, all_cv_ranges)):
+        ax2.plot(time, cv_range, alpha=0.7, linewidth=2, color=blue)
+    ax2.set_xlabel("Time (ns)", fontsize=FONTSIZE_SMALL)
+    ax2.set_ylabel("CV Range", fontsize=FONTSIZE_SMALL)
+    ax2.set_title("CV Exploration Range", fontsize=FONTSIZE_SMALL)
+    format_plot_axes(ax2, fig=fig, model_type=cfg.method, show_y_labels=(cfg.method == "tica"))
+
+    # 3. Bias evolution (rolling average)
+    ax3 = fig.add_subplot(gs[1, 0])
+    for i, (bias_time, bias_rolling) in enumerate(all_bias_evolutions):
+        ax3.plot(bias_time, bias_rolling, alpha=0.7, linewidth=2, color=blue)
+    ax3.set_xlabel("Time (ns)", fontsize=FONTSIZE_SMALL)
+    ax3.set_ylabel("Bias (rolling avg)", fontsize=FONTSIZE_SMALL)
+    ax3.set_title("Bias Evolution", fontsize=FONTSIZE_SMALL)
+    format_plot_axes(ax3, fig=fig, model_type=cfg.method, show_y_labels=(cfg.method == "tica"))
+
+    # 4. CV range distribution
+    ax4 = fig.add_subplot(gs[1, 1])
+    cv_ranges = [stats['cv_range'] for stats in simulation_stats.values()]
+    ax4.hist(cv_ranges, bins=10, alpha=0.7, color=blue, edgecolor='black', log=True)
+    ax4.axvline(np.mean(cv_ranges), color='red', linestyle='--', linewidth=2, label=f"Mean: {np.mean(cv_ranges):.2f}")
+    ax4.set_ylim(0, 1)
+    ax4.set_xlabel("CV Range", fontsize=FONTSIZE_SMALL)
+    ax4.set_ylabel("Count", fontsize=FONTSIZE_SMALL)
+    ax4.set_title("CV Range Distribution", fontsize=FONTSIZE_SMALL)
+    format_plot_axes(ax4, fig=fig, model_type=cfg.method, show_y_labels=(cfg.method == "tica"))
+    
+    # Right-side summary panel spanning two rows
+    ax_summary = fig.add_subplot(gs[:, 2])
+    ax_summary.axis('off')
+    
+    # Calculate summary statistics
+    total_simulations = len(simulation_stats)
+    avg_time = np.mean([stats['total_time'] for stats in simulation_stats.values()])
+    avg_steps = np.mean([stats['total_steps'] for stats in simulation_stats.values()])
+    avg_cv_range = np.mean([stats['cv_range'] for stats in simulation_stats.values()])
+    avg_bias = np.mean([stats['final_bias'] for stats in simulation_stats.values()])
+    
+    summary_text = f"""
+OPES Simulation Progress Summary
+
+Total Simulations: {total_simulations}
+Average Time: {avg_time:.1f} ns
+Average Steps: {int(avg_steps):,}
+Average CV Range: {avg_cv_range:.3f}
+Average Final Bias: {avg_bias:.2f}
+
+Active Seeds: {len([s for s in simulation_stats.values() if s['total_time'] > 0])}
+Completed: {len([s for s in simulation_stats.values() if s['total_time'] > avg_time * 0.9])}
+    """
+    
+    ax_summary.text(0.05, 0.95, summary_text, transform=ax_summary.transAxes, fontsize=FONTSIZE_SMALL-2,
+                    verticalalignment='top', fontfamily='monospace',
+                    bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+    
+    # Save plot
+    save_plot_dual_format(str(analysis_dir), filename, dpi=300, bbox_inches="tight")
+    logger.info(f"OPES progress plot saved to {analysis_dir}")
+    
+    # Log to wandb
+    wandb.log({
+        "opes_progress": wandb.Image(str(analysis_dir / f"{filename}.png")),
+        "simulation_progress/active_seeds": len([s for s in simulation_stats.values() if s['total_time'] > 0]),
+        "simulation_progress/avg_time_ns": round(avg_time, 2),
+        "simulation_progress/avg_cv_range": round(avg_cv_range, 3),
+        "simulation_progress/avg_final_bias": round(avg_bias, 2),
+    })
+    
+    plt.close()
+    
+    return simulation_stats
+
+
 def plot_cv_over_time(
     cfg,
     log_dir: Path,
@@ -1020,7 +1185,10 @@ def main(cfg):
     analysis_dir.mkdir(parents=True, exist_ok=True)
     max_seed = cfg.opes.max_seed
     sigma = cfg.opes.sigma
-    ckpt_date = cfg.ckpt_date
+    if cfg.method == "ours":
+        ckpt_date = cfg.ckpt_date
+    else:
+        ckpt_date = None
     
     # Initialize wandb
     config = OmegaConf.to_container(cfg)
@@ -1038,22 +1206,52 @@ def main(cfg):
             gmx_process_energy(log_dir, analysis_dir, max_seed)
         else:
             logger.info("Skipping gmx trajectory post-processing and energy calculation...")
-        
-        # Run analysis functions
-        # logger.info("Running CV analysis...")
-        # plot_cv_over_time(cfg, log_dir, max_seed, analysis_dir)
-        
-        # logger.info("Running RMSD analysis...")
-        # plot_rmsd_analysis(cfg, log_dir, max_seed, analysis_dir)
-        
-        # logger.info("Running TICA scatter analysis...")
-        # plot_tica_scatter(cfg, log_dir, max_seed, analysis_dir)
-        
-        logger.info("Running free energy analysis...")
-        reference_cvs = compute_cv_values(cfg, max_seed, batch_size=10000, ckpt_date=ckpt_date)
-        plot_free_energy_curve(cfg, log_dir, max_seed, analysis_dir, reference_cvs)
-        plot_pmf(cfg, sigma, log_dir, max_seed, analysis_dir, reference_cvs)
-        
+
+        # Determine which plots to generate from hydra config (default: all)
+        plots_config = getattr(cfg, 'analysis', None)
+        plots = getattr(plots_config, 'plots', ['all']) if plots_config is not None else ['all']
+        if 'all' in plots:
+            plots_to_generate = [
+                'cv_over_time',
+                'rmsd',
+                'tica',
+                'opes_progress',
+                'free_energy_curve',
+                'pmf',
+            ]
+        else:
+            plots_to_generate = plots
+
+        # Run selected analysis functions
+        if 'cv_over_time' in plots_to_generate:
+            logger.info("Running CV over time analysis...")
+            plot_cv_over_time(cfg, log_dir, max_seed, analysis_dir)
+
+        if 'rmsd' in plots_to_generate:
+            logger.info("Running RMSD analysis...")
+            plot_rmsd_analysis(cfg, log_dir, max_seed, analysis_dir)
+
+        if 'tica' in plots_to_generate:
+            logger.info("Running TICA scatter analysis...")
+            plot_tica_scatter(cfg, log_dir, max_seed, analysis_dir)
+
+        if 'opes_progress' in plots_to_generate:
+            logger.info("Running OPES progress analysis...")
+            plot_opes_progress(cfg, log_dir, max_seed, analysis_dir)
+
+        # Compute reference CVs only if needed by any selected plot
+        needs_reference = any(p in plots_to_generate for p in ['free_energy_curve', 'pmf'])
+        if needs_reference:
+            logger.info("Running free energy related analyses...")
+            reference_cvs = compute_cv_values(cfg, max_seed, batch_size=10000, ckpt_date=ckpt_date)
+            if reference_cvs is not None:
+                if 'free_energy_curve' in plots_to_generate:
+                    plot_free_energy_curve(cfg, log_dir, max_seed, analysis_dir, reference_cvs)
+                if 'pmf' in plots_to_generate:
+                    plot_pmf(cfg, sigma, log_dir, max_seed, analysis_dir, reference_cvs)
+            else:
+                logger.warning("Skipping PMF and free energy curve due to missing reference CVs")
+
         logger.info("Analysis completed successfully!")
         
     except Exception as e:

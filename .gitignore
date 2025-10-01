@@ -157,3 +157,4 @@ cython_debug/
 *download*
 /opes/model/temp/*
 *.bak*
+smd/

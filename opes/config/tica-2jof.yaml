@@ -15,3 +15,5 @@ analysis:
   skip_steps: 50000
   unit_steps: 25000
   equil_temp: 290
+  interval: 21600
+  plots: all

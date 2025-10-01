@@ -1,0 +1,48 @@
+# Example configuration for OPES simulation with periodic analysis
+# This shows how to configure the new monitoring and analysis features
+
+# Basic simulation parameters
+molecule: cln025
+method: ours
+date: "20241201_120000"  # Format: YYYYMMDD_HHMMSS
+ckpt_dir: "model_checkpoints"
+ckpt_path: "best_model"
+ckpt_date: "20241201"
+
+# GPU and hardware settings
+start_gpu: 0
+
+# OPES simulation parameters
+opes:
+  step: 1000000  # Total simulation steps
+  max_seed: 4    # Number of parallel simulations (seeds 0 to max_seed)
+  sigma: 0.1     # OPES kernel width
+  ntomp: 4       # Number of OpenMP threads
+
+# NEW: Periodic analysis settings
+analysis_interval: 3600  # Run analysis every 3600 seconds (1 hour)
+                         # Set to smaller values for more frequent updates
+                         # Set to 0 to disable periodic analysis
+
+# Analysis parameters
+analysis:
+  equil_temp: 300.0     # Temperature in K
+  skip_steps: 50000     # Steps to skip for equilibration
+  unit_steps: 10000     # Steps between analysis points
+  gmx: true            # Whether to run GROMACS post-processing
+
+# Wandb logging
+tags: [opes, monitoring, enhanced_sampling]
+
+# Example usage:
+# python opes/main.py --config-name=basic molecule=cln025 method=ours analysis_interval=1800
+#
+# This will:
+# 1. Start OPES simulations in parallel
+# 2. Run analysis every 30 minutes (1800 seconds)
+# 3. Generate progress plots showing:
+#    - CV exploration over time
+#    - Bias evolution
+#    - Simulation statistics
+#    - Progress summary
+# 4. Log results to wandb for monitoring

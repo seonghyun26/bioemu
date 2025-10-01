@@ -27,6 +27,7 @@ import torch
 import re
 from matplotlib.colors import LogNorm
 from itertools import combinations
+import threading
 
 from omegaconf import OmegaConf
 from pathlib import Path
@@ -64,9 +65,16 @@ class OPESSimulationRunner:
         self.log_dir = self.base_simulation_dir / self.datetime
         os.makedirs(self.log_dir, exist_ok=True)
         logger.info(f"Setting up simulation in: {self.log_dir}")
+        
+        # Analysis scheduling
+        self.analysis_interval = getattr(cfg.analysis, 'interval', 3600)  # Default: 1 hour
+        print(f"Set interval to {self.analysis_interval}")
+        self.analysis_thread = None
+        self.stop_analysis = threading.Event()
     
     def prepare_plumed_config(
         self,
+        start_gpu: int,
         seed: int,
     ) -> Path:
         seed_dir = self.log_dir / str(seed)
@@ -136,39 +144,10 @@ class OPESSimulationRunner:
     ) -> bool:
         seed_dir = self.log_dir / str(seed)
         gpu_id = seed + self.cfg.start_gpu
-        
-        # GROMACS command
-        # if self.cfg.gpu == 0:
-        #     logger.info(f"Running GROMACS simulation for seed {seed} on CPU")
-        #     cmd = [
-        #         "gmx", "mdrun",
-        #         "-s", f"./data/{self.molecule.upper()}/nvt_0.tpr",
-        #         "-deffnm", str(seed_dir),
-        #         "-plumed", str(plumed_file),
-        #         "-nsteps", str(self.step),
-        #         "-reseed", str(seed),
-        #         "-ntomp", "1",
-        #         "-bonded", "cpu",
-        #         "-nb", "cpu",
-        #         "-pin", "on",
-        #         "-pme", "cpu",
-        #     ]
-        # else:
-            # logger.info(f"Running GROMACS simulation for seed {seed} on GPU")
-        # if self.cfg.molecule == "1fme":
-        #     nvt_name = "nvt_ions"
-        # elif self.cfg.molecule == "gtt":
-        #     nvt_name = "nvt_1"
-        # else:
-        #     nvt_name = "nvt_0"
-        if self.cfg.molecule in ["cln025", "2jof", "1fme", "gtt"]:
-            nvt_name = "md"
-        else:
-            nvt_name = "nvt_0"
         ntomp_num = self.cfg.opes.ntomp
         cmd = [
             "gmx", "mdrun",
-            "-s", f"./data/{self.molecule.upper()}/{nvt_name}.tpr",
+            "-s", f"./data/{self.molecule.upper()}/md.tpr",
             "-deffnm", str(seed_dir),
             "-plumed", str(plumed_file),
             "-nsteps", str(self.step),
@@ -237,6 +216,75 @@ class OPESSimulationRunner:
             logger.error(f"Error changing permissions for seed {seed}: {e}")
             return False
     
+    def run_periodic_analysis(self):
+        """Run periodic analysis in a separate thread"""
+        def analysis_worker():
+            while not self.stop_analysis.is_set():
+                try:
+                    logger.info("Running periodic analysis...")
+                    self.run_analysis()
+                    # Wait for the specified interval or until stop is requested
+                    if self.stop_analysis.wait(timeout=self.analysis_interval):
+                        break
+                except Exception as e:
+                    logger.error(f"Error in periodic analysis: {e}")
+                    # Continue running even if one analysis fails
+                    if self.stop_analysis.wait(timeout=300):  # Wait 5 minutes before retry
+                        break
+        
+        self.analysis_thread = threading.Thread(target=analysis_worker, daemon=True)
+        self.analysis_thread.start()
+        logger.info(f"Started periodic analysis thread (interval: {self.analysis_interval}s)")
+    
+    def stop_periodic_analysis(self):
+        """Stop the periodic analysis thread"""
+        if self.analysis_thread and self.analysis_thread.is_alive():
+            logger.info("Stopping periodic analysis...")
+            self.stop_analysis.set()
+            self.analysis_thread.join(timeout=10)
+            logger.info("Periodic analysis stopped")
+    
+    def run_analysis(self):
+        """Run analysis using the analysis_opes.py script"""
+        try:
+            # Prepare analysis command
+            analysis_cmd = [
+                "python", "./analysis_opes.py",
+                "--config-name", f"{self.cfg.method}-{self.molecule}",
+                "date=" + self.datetime,
+                "analysis.gmx=False",
+                "opes.max_seed=" + str(self.max_seed),
+                "opes.sigma=" + str(self.sigma),
+                "analysis.skip_steps=" + str(self.cfg.analysis.skip_steps),
+                "analysis.unit_steps=" + str(self.cfg.analysis.unit_steps),
+                "analysis.plots=['cv_over_time','rmsd','tica','opes_progress']",
+            ]
+            
+            logger.info(f"Running analysis command: {' '.join(analysis_cmd)}")
+            
+            # Run analysis in subprocess
+            process = subprocess.run(
+                analysis_cmd,
+                capture_output=True,
+                text=True,
+                timeout=1800,  # 30 minute timeout
+                cwd=os.getcwd()
+            )
+            
+            if process.returncode == 0:
+                logger.info("Periodic analysis completed successfully")
+            else:
+                logger.warning(f"Analysis completed with warnings (return code: {process.returncode})")
+                if process.stderr:
+                    logger.warning(f"Analysis stderr: {process.stderr[:500]}...")  # Truncate long output
+            if process.stdout:
+                logger.info(f"Analysis output: {process.stdout[-500:]}...")  # Show last 500 chars
+                
+        except subprocess.TimeoutExpired:
+            logger.error("Analysis timed out after 30 minutes")
+        except Exception as e:
+            logger.error(f"Error running analysis: {e}")
+    
     def run_simulations(
         self
     ):
@@ -249,7 +297,7 @@ class OPESSimulationRunner:
         
         # Start all simulations
         for seed in range(self.max_seed + 1):
-            plumed_file = self.prepare_plumed_config(seed)
+            plumed_file = self.prepare_plumed_config(self.cfg.start_gpu, seed)
             process = self.run_gromacs_simulation(seed, plumed_file)
             if process:
                 processes.append((seed, process))
@@ -264,12 +312,15 @@ class OPESSimulationRunner:
         
         logger.info(f"Successfully started {len(processes)} simulations")
         
+        # Start periodic analysis
+        self.run_periodic_analysis()
+        
         # Wait for all simulations to complete
         logger.info("Waiting for all GROMACS simulations to complete...")
         completed_successfully = []
         failed_simulations = []
         
-        # Monitor all processes
+        # Monitor all processes with periodic analysis
         total_processes = len(processes)
         for i, (seed, process) in enumerate(processes):
             try:
@@ -289,6 +340,9 @@ class OPESSimulationRunner:
             except Exception as e:
                 logger.error(f"Error waiting for simulation {seed}: {e}")
                 failed_simulations.append(seed)
+        
+        # Stop periodic analysis
+        self.stop_periodic_analysis()
         
         logger.info(f"Simulation summary: {len(completed_successfully)} successful, {len(failed_simulations)} failed")
         if completed_successfully:

@@ -36,8 +36,8 @@ if __name__ == "__main__":
     # parser.add_argument("--molecule", type=str, default="2JOF")
     # args = parser.parse_args()
     
-    method_list = ["vde"]
-    molecule_list = ["CLN025"]
+    method_list = ["ours"]
+    molecule_list = ["2JOF"]
     # method_list = ["tica", "tae", "vde",]
     # molecule_list = ["CLN025","2JOF","1FME"]
     device = "cuda:0"
